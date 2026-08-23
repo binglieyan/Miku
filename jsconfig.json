@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "checkJs": true,
+    "strict": false,
+    "noEmit": true,
+    "types": ["@webgpu/types"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["js/**/*.js", "index.html"],
+  "exclude": ["node_modules", "dist"]
+}

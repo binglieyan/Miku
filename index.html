@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+  <title>雪中Miku</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+    }
+
+    /*
+     * CSS 背景层常驻显示（不再有 WebGPU → CSS 回退切换）。
+     * canvas 为透明背景，粒子渲染在上层，浏览器合成器做图层叠加。
+     * display mode 通过 JS 直接修改 background-size 属性切换。
+     */
+    #background {
+      position: fixed;
+      inset: 0;
+      background: url(images/bg.png) center/cover no-repeat;
+      z-index: 0;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="background"></div>
+  <canvas id="canvas"></canvas>
+
+  <script type="module" src="js/settings.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,79 @@
+{
+	"contentrating" : "Everyone",
+	"description" : "原画师:\n千夜QYS3 ( pixiv id: 7210261 )\n注: 已获得原画师授权。",
+	"file" : "index.html",
+	"general" : 
+	{
+		"properties" : 
+		{
+			"aNumber" :
+			{
+				"index" : 0,
+				"max" : 1000,
+				"min" : 0,
+				"order" : 100,
+				"text" : "粒子数量",
+				"type" : "slider",
+				"value" : 500
+			},
+			"aSpeed" : 
+			{
+				"index" : 1,
+				"max" : 3500,
+				"min" : 500,
+				"order" : 101,
+				"text" : "粒子速度",
+				"type" : "slider",
+				"value" : 2000
+			},
+			"customcombo" : 
+			{
+				"index" : 2,
+				"options" : 
+				[
+					{
+						"label" : "填充",
+						"value" : "cover"
+					},
+					{
+						"label" : "等比缩放",
+						"value" : "contain"
+					},
+					{
+						"label" : "平铺",
+						"value" : "auto"
+					}
+				],
+				"order" : 102,
+				"text" : "壁纸显示方式",
+				"type" : "combo",
+				"value" : "cover"
+			},
+			"custompink" : 
+			{
+				"index" : 3,
+				"order" : 103,
+				"text" : "使用粉色粒子",
+				"type" : "bool",
+				"value" : false
+			},
+			"schemecolor" : 
+			{
+				"order" : 0,
+				"text" : "ui_browse_properties_scheme_color",
+				"type" : "color",
+				"value" : "0 0 0"
+			}
+		}
+	},
+	"preview" : "preview.jpg",
+	"ratingsex" : "none",
+	"ratingviolence" : "none",
+	"tags" : [ "Anime" ],
+	"title" : "[雪中Miku] [4k] [原画师: 千夜QYS3]",
+	"type" : "Web",
+	"version" : 6,
+	"visibility" : "public",
+	"workshopid" : "3755473060",
+	"workshopurl" : "steam://url/CommunityFilePage/3755473060"
+}

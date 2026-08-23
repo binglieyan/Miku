@@ -1,0 +1,23 @@
+{
+  "name": "Miku",
+  "version": "2.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "run-s \"lint:*\"",
+    "lint:oxlint": "oxlint . --fix",
+    "lint:eslint": "eslint . --fix --cache",
+    "format": "oxfmt js/"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@webgpu/types": "^0.1.72",
+    "eslint": "^10.9.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-oxlint": "~1.79.0",
+    "globals": "^17.11.0",
+    "npm-run-all2": "^9.0.3",
+    "oxfmt": "^0.64.0",
+    "oxlint": "~1.79.0"
+  }
+}
