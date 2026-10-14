@@ -315,7 +315,7 @@ fn main(
     // ③ 远距 x/y 环绕在屏内闪现。
     // 用预测深度：风场已进入物理位置，渐隐跟随真实轨迹，不再需要"必须用
     // 未受扰动的物理深度，否则透明度随风场呼吸"的旧约束。
-    // 起点取 MAX_DIST（cameraZ + 1000）与"远端环绕面前 MIN_FAR_FADE"中的较小值：
+    // 起点取 MAX_DIST（cameraZ + 1000）与"远端环绕面前 MIN_FAR_FADE"的较小值：
     // 前者是设计上的最远可见距离，后者保证 smoothstep 的 edge0 < edge1。现行
     // 世界参数下 farFadeEnd 恒大于 MAX_DIST（见 _updateWorldSize 的不变量），
     // 所以这里取到的始终是 MAX_DIST；万一将来常量被调坏，也只是把渐隐带压窄，
@@ -912,8 +912,9 @@ function _writeComputeUniforms() {
  * 将 render uniform 数据写入 GPU 缓冲区。
  *
  * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, yHalf, zMin, zMax]
- * extrapFactor 与 extrapPhase 在这里写入**当前值**（属性回调可能发生在帧间，
- * 缓冲区任何时刻都应自洽），handleFrame 每帧再用最新值覆盖 offset 24 的两个 f32。
+ * extrapFactor 与 extrapPhase 在这里写入**当前值**：属性回调可能发生在帧间，
+ * 缓冲区任意时刻都应自洽。handleFrame 每帧会用最新值覆盖 offset 24 的这两个
+ * f32。
  *
  * @returns {void}
  */
