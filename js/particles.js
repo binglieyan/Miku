@@ -1062,7 +1062,9 @@ async function _initGPUResources() {
       device: _device,
       format: _format,
       alphaMode: 'premultiplied',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
+      // 画布纹理只作为渲染附件使用（没有任何 copyTextureToBuffer /
+      // copyBufferToTexture 针对它），因此不需要声明 COPY_DST。
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
 
     _computeUniformBuf = _device.createBuffer({
