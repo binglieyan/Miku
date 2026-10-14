@@ -24,8 +24,15 @@
  *  DOM 引用
  * ———————————————————————————————————————————— */
 
-/** @type {HTMLCanvasElement} */
+/** @type {?HTMLCanvasElement} */
 const canvas = document.getElementById('canvas');
+
+// 缺少 canvas 时没有可渲染的目标，但模块必须能**成功求值**：粒子模块抛异常会
+// 连带打死入口 settings.js，属性桥（含背景显示模式）会一起失效。这里只报错，
+// 各使用点再各自早退——属性桥因此照常工作，只是没有雪花。
+if (!canvas) {
+  console.error('[particles] 未找到 #canvas，粒子层已禁用（背景层与属性桥不受影响）');
+}
 
 /* ————————————————————————————————————————————
  *  WGSL 着色器
@@ -665,6 +672,11 @@ function _shutdown() {
   _computeBG_BA = null;
   _renderBG_0 = null;
   _renderBG_1 = null;
+  // 有意不在这里清空画布：设备丢失后 GPU 提交会被丢弃（什么也提交不出去），
+  // 而非 GPU 的清空手段（隐藏 canvas / 重置后备缓冲）会把"设备丢失到重试成功
+  // 之间的约 2 秒"从"雪花静止"变成"雪花消失又回来"，对瞬态丢失反而更突兀；
+  // 永久失败时一张静止的雪景也比空场景更接近优雅降级。冻结帧还会在下一次
+  // resize（重置后备缓冲）时自然消失，不会长期残留。
   if (_rafId !== null) {
     cancelAnimationFrame(_rafId);
     _rafId = null;
@@ -979,6 +991,11 @@ async function _initGPU() {
  * @returns {Promise<void>}
  */
 async function _initGPUResources() {
+  if (!canvas) {
+    // 没有渲染目标：不启动粒子层，也不安排重试；模块本身保持可用。
+    _abortInit();
+    return;
+  }
   if (typeof navigator === 'undefined' || !navigator.gpu) {
     _abortInit();
     return;
@@ -1262,6 +1279,7 @@ let _dprQuery = null;
  * @returns {void}
  */
 function _applyCanvasSize() {
+  if (!canvas) return;
   const dpr = window.devicePixelRatio || 1;
   W = Math.max(1, Math.floor(window.innerWidth * dpr));
   H = Math.max(1, Math.floor(window.innerHeight * dpr));
