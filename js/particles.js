@@ -50,7 +50,6 @@ struct Particle {
 struct Uniforms {
   speedFactor: f32,
   worldHalf:   f32,   // x 半宽
-  worldSize:   f32,   // x 总宽
   yHalf:       f32,   // 盒子世界：y 半高（小于 x）
   zMin:        f32,   // 盒子世界：z 下限（可见深度带远端）
   zMax:        f32,   // 盒子世界：z 上限（相机后 1 单位环绕落点）
@@ -184,7 +183,6 @@ struct Uniforms {
   extrapFactor:   f32,   // speedFactor × (accum / FIXED_STEP)，0 时不外推
   extrapPhase:    f32,   // (accum / FIXED_STEP) / 60：分数步对应的相位增量
   worldHalf:      f32,   // 动态世界 x 半宽（由 JS 根据视锥计算）
-  worldSize:      f32,   // 动态世界 x 总宽
   yHalf:          f32,   // 盒子世界：y 半高
   zMin:           f32,   // 盒子世界：z 下限
   zMax:           f32,   // 盒子世界：z 上限
@@ -371,7 +369,6 @@ struct Uniforms {
   extrapFactor:   f32,  // 顶点着色器专用，此处不读取
   extrapPhase:    f32,  // 顶点着色器专用，此处不读取
   worldHalf:      f32,  // 顶点着色器专用，此处不读取
-  worldSize:      f32,  // 顶点着色器专用，此处不读取
   yHalf:          f32,  // 顶点着色器专用，此处不读取
   zMin:           f32,  // 顶点着色器专用，此处不读取
   zMax:           f32,  // 顶点着色器专用，此处不读取
@@ -458,12 +455,12 @@ let _renderBG_1 = null;
 
 /**
  * Compute uniform 共用缓冲区（Float32Array 视图）。
- * 布局：[speedFactor, worldHalf, worldSize, yHalf, zMin, zMax, cameraZ, count(u32)]
- * 共 8 个字段 → 32 字节（count 为 u32，仍占 4 字节）。
+ * 布局：[speedFactor, worldHalf, yHalf, zMin, zMax, cameraZ, count(u32)]
+ * 共 7 个字段 → 28 字节（count 为 u32，仍占 4 字节）。
  *
  * @type {Float32Array}
  */
-const _computeUniformData = new Float32Array(8);
+const _computeUniformData = new Float32Array(7);
 
 /**
  * Compute uniform 共用缓冲区的 Uint32Array 视图（用于写入 u32 count 字段）。
@@ -474,12 +471,12 @@ const _computeUniformU32 = new Uint32Array(_computeUniformData.buffer);
 
 /**
  * Render uniform 共用缓冲区（Float32Array 视图）。
- * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, worldSize, yHalf, zMin, zMax]
- * 共 13 个 f32 → 52 字节。
+ * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, yHalf, zMin, zMax]
+ * 共 12 个 f32 → 48 字节。
  *
  * @type {Float32Array}
  */
-const _renderUniformData = new Float32Array(13);
+const _renderUniformData = new Float32Array(12);
 
 /**
  * 每帧 render uniform 临时缓冲区（两个 f32，写入 offset 24）：
@@ -800,7 +797,7 @@ function _rebuildBindGroups() {
 /**
  * 将 compute uniform 数据写入 GPU 缓冲区。
  *
- * 布局：[speedFactor: f32, worldHalf: f32, worldSize: f32, yHalf: f32, zMin: f32, zMax: f32, cameraZ: f32, count: u32]
+ * 布局：[speedFactor: f32, worldHalf: f32, yHalf: f32, zMin: f32, zMax: f32, cameraZ: f32, count: u32]
  *
  * @returns {void}
  */
@@ -808,19 +805,18 @@ function _writeComputeUniforms() {
   if (!_queue || !_computeUniformBuf) return;
   _computeUniformData[0] = _speedFactor;
   _computeUniformData[1] = WORLD_HALF;
-  _computeUniformData[2] = WORLD_SIZE;
-  _computeUniformData[3] = Y_HALF;
-  _computeUniformData[4] = Z_MIN;
-  _computeUniformData[5] = Z_MAX;
-  _computeUniformData[6] = CAMERA_Z;
-  _computeUniformU32[7] = _count;
+  _computeUniformData[2] = Y_HALF;
+  _computeUniformData[3] = Z_MIN;
+  _computeUniformData[4] = Z_MAX;
+  _computeUniformData[5] = CAMERA_Z;
+  _computeUniformU32[6] = _count;
   _queue.writeBuffer(_computeUniformBuf, 0, _computeUniformData);
 }
 
 /**
  * 将 render uniform 数据写入 GPU 缓冲区。
  *
- * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, worldSize, yHalf, zMin, zMax]
+ * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, yHalf, zMin, zMax]
  * extrapFactor 与 extrapPhase 不在此函数中更新，由 handleFrame 每帧单独写入
  * （offset 24，两个 f32）。
  *
@@ -837,10 +833,9 @@ function _writeRenderUniforms() {
   _renderUniformData[6] = 0;   // extrapFactor（每帧覆盖）
   _renderUniformData[7] = 0;   // extrapPhase（每帧覆盖）
   _renderUniformData[8] = WORLD_HALF;
-  _renderUniformData[9] = WORLD_SIZE;
-  _renderUniformData[10] = Y_HALF;
-  _renderUniformData[11] = Z_MIN;
-  _renderUniformData[12] = Z_MAX;
+  _renderUniformData[9] = Y_HALF;
+  _renderUniformData[10] = Z_MIN;
+  _renderUniformData[11] = Z_MAX;
   _queue.writeBuffer(_renderUniformBuf, 0, _renderUniformData);
 }
 
@@ -938,11 +933,11 @@ async function _initGPU() {
     });
 
     _computeUniformBuf = _device.createBuffer({
-      size: 32,  // 8 个字段（cameraZ + u32 count）
+      size: 28,  // 7 个字段（cameraZ + u32 count）
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     _renderUniformBuf = _device.createBuffer({
-      size: 52,  // 13 个 f32
+      size: 48,  // 12 个 f32
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
