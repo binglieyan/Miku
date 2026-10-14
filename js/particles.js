@@ -34,7 +34,7 @@ const canvas = document.getElementById('canvas');
 /**
  * 物理步进 compute shader（WGSL）。
  *
- * 每个线程处理一个粒子：位移 + 边界环绕。
+ * 每个线程处理一个粒子：基础运动 + 物理湍流/风场位移 + 三轴边界环绕。
  * 活跃粒子数由 uniform count 控制（i >= count 的线程直接返回，
  * 对应粒子不再步进、各自保留最后一次被写入的状态——不重置、无闪烁），
  * 工作组分发数 = ceil(count / 64)。
@@ -43,8 +43,8 @@ const canvas = document.getElementById('canvas');
  */
 const COMPUTE_SHADER = /* wgsl */ `
 struct Particle {
-  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：湍流摆动相位
-  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流摆动幅度
+  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：粒子局部模拟时钟
+  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流幅度
 }
 
 struct Uniforms {
@@ -54,12 +54,50 @@ struct Uniforms {
   yHalf:       f32,   // 盒子世界：y 半高（小于 x）
   zMin:        f32,   // 盒子世界：z 下限（可见深度带远端）
   zMax:        f32,   // 盒子世界：z 上限（相机后 1 单位环绕落点）
+  cameraZ:     f32,   // 相机 Z（近处收敛系数需要每颗粒子的深度）
   count:       u32,
 }
 
 @group(0) @binding(0) var<storage, read>       src: array<Particle>;
 @group(0) @binding(1) var<storage, read_write>  dst: array<Particle>;
 @group(0) @binding(2) var<uniform>              u:   Uniforms;
+
+// 把任意距离的坐标折回 [minValue, maxValue)，而不是只修正一次。
+// 这同时覆盖窗口缩放、较大风场位移以及单帧跨越多个世界周期的情况。
+fn wrapRange(value: f32, minValue: f32, maxValue: f32) -> f32 {
+  let range = maxValue - minValue;
+  return value - range * floor((value - minValue) / range);
+}
+
+const TIME_WRAP: f32 = 628.3185307179587; // 200π，所有时间频率的共同周期
+
+// 每个固定物理步（FIXED_STEP = 1/60 秒）推进的相位量：1/60 相位 = 1 秒真实
+// 时间。风场与阵风的时间尺度因此与 aSpeed 滑杆（speedFactor）解耦——与把
+// 风场移入物理位置之前用真实秒数当相位的行为一致。
+const PHASE_PER_STEP: f32 = 1.0 / 60.0;
+
+fn swayX(phase: f32, amplitude: f32) -> f32 {
+  return (sin(phase * 2.0) * 26.0 + sin(phase) * 16.0) * amplitude;
+}
+
+fn swayY(phase: f32, amplitude: f32) -> f32 {
+  return cos(phase * 2.2) * 13.0 * amplitude;
+}
+
+fn gustPulse(phase: f32) -> f32 {
+  return 0.55 + 0.45 * sin(phase * 0.18 + 2.0);
+}
+
+fn windXOffset(x: f32, y: f32, phase: f32) -> f32 {
+  let wind = sin(x * 0.006 + phase * 0.8 + 1.3) * 16.0
+           + sin(y * 0.005 - phase * 0.35 + 0.7) * 20.0
+           + sin((x + y) * 0.0025 - phase * 0.12) * 22.0;
+  return wind * gustPulse(phase);
+}
+
+fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
+  return sin(x * 0.0035 + y * 0.0035 + phase * 0.25) * 45.0 * gustPulse(phase);
+}
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -68,26 +106,41 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
   var p = src[i];
 
-  p.posX += p.velX * u.speedFactor;
-  p.posY += p.velY * u.speedFactor;
-  p.posZ += p.velZ * u.speedFactor;
+  // _p0 是每个粒子的局部模拟时钟（初始值随机），让湍流和风场在物理步进中
+  // 改变粒子轨迹，而不是在顶点着色器里把粒子“画”到另一个位置。
+  // 相位按固定步长推进（1 相位 = 1 秒真实时间，见 PHASE_PER_STEP），不随
+  // aSpeed 滑杆变化；再按共同周期折回以防 f32 精度退化。
+  let phase0 = p._p0;
+  let phase1 = wrapRange(phase0 + PHASE_PER_STEP, 0.0, TIME_WRAP);
 
-  // Y 单向环绕（粒子只下落；盒子世界 y 半高小于 x）
-  if (p.posY < -u.yHalf) { p.posY += 2.0 * u.yHalf; }
+  let nextX = p.posX + p.velX * u.speedFactor;
+  let nextY = p.posY + p.velY * u.speedFactor;
+  let nextZ = p.posZ + p.velZ * u.speedFactor;
 
-  // X 双向环绕
-  if (p.posX > u.worldHalf) {
-    p.posX -= u.worldSize;
-  } else if (p.posX < -u.worldHalf) {
-    p.posX += u.worldSize;
-  }
+  // 近处收敛：靠近镜头的湍流/风场位移按深度衰减（dist < 500 起衰减，下限
+  // 0.35），避免贴脸雪花摆动过剧——与风场进入物理位置之前 nearScale 的语义
+  // 一致。compute / vertex 用同一表达式与同一 p.posZ，保证两侧轨迹一致。
+  let nearScale = clamp((u.cameraZ - p.posZ) / 500.0, 0.35, 1.0);
 
-  // Z 双向环绕（盒子世界：z 范围 = 可见深度带 + 相机后环绕落点）
-  if (p.posZ > u.zMax) {
-    p.posZ -= u.zMax - u.zMin;
-  } else if (p.posZ < u.zMin) {
-    p.posZ += u.zMax - u.zMin;
-  }
+  // 湍流、横向风、深度风都以“位移差”形式进入模拟位置，避免每帧重复叠加
+  // 一个绝对偏移值造成无界漂移。风场按当前物理位置采样，形成空间变化的气流。
+  let deltaSwayX = (swayX(phase1, p._p1) - swayX(phase0, p._p1)) * nearScale;
+  let deltaSwayY = (swayY(phase1, p._p1) - swayY(phase0, p._p1)) * nearScale;
+  let deltaWindX = (windXOffset(p.posX, p.posY, phase1)
+                  - windXOffset(p.posX, p.posY, phase0)) * nearScale;
+  let deltaWindZ = (windZOffset(p.posX, p.posY, phase1)
+                  - windZOffset(p.posX, p.posY, phase0)) * nearScale;
+
+  p.posX = nextX + deltaSwayX + deltaWindX;
+  p.posY = nextY + deltaSwayY;
+  p.posZ = nextZ + deltaWindZ;
+  p._p0 = phase1;
+
+  // 三轴统一使用模运算式环绕，缩放后落在新边界之外或一步跨越多个周期也有效。
+  // Y 的双向折返只会在缩小世界或湍流上移时触发；正常下落仍从下边界回到上方。
+  p.posX = wrapRange(p.posX, -u.worldHalf, u.worldHalf);
+  p.posY = wrapRange(p.posY, -u.yHalf, u.yHalf);
+  p.posZ = wrapRange(p.posZ, u.zMin, u.zMax);
 
   dst[i] = p;
 }
@@ -97,26 +150,27 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
  * 顶点着色器（WGSL）— 实例化 billboard 四边形 + 时间外推。
  *
  * 每个实例 = 一个粒子，4 个顶点组成正方形（triangle-strip）。
- * 外推：根据 u.extrapFactor 将粒子位置沿速度方向前推，
- * 使渲染位置对齐到当前时间点而非上一个物理步时间点。
- * 轨迹增强：在外推基础上叠加湍流摆动 + 空间风场 + 阵风脉冲（仅渲染期，
- * 不写回物理缓冲），近处粒子按深度收敛幅度。
+ * 外推：根据 u.extrapFactor（基础速度）与 u.extrapPhase（风场相位的分数步）
+ * 把粒子位置前推到当前时间点，使渲染位置对齐到当前帧而非上一个物理步。
+ * 粒子轨迹中的湍流摆动、横向风场与深度风场由 compute shader 写入物理位置；
+ * 本着色器只做固定步长外推和投影，避免显示位置与碰撞/环绕位置分离。
+ * 近处收敛：与 compute shader 使用同一个 nearScale（dist < 500 起衰减、下限
+ * 0.35），保证同一颗粒子在两侧得到同一段位移。
  * 近距处理：屏幕半径封顶 MAX_SR（防 1/dist 病态填充率尖峰），
  * dist < NEAR_DIST 的粒子 alpha 平滑渐隐至 0（镜头前"化开"，替代贴脸圆盘）。
- * 可见性门控：物理上在相机后方的粒子恒不可见（渲染期风场可能把渲染深度
- * 推到镜头前，使 z 环绕落点在阵风峰值时闪现）；物理位置越出视锥横向
- * 范围时按越界量渐隐（风场可能把渲染位置推入屏内，造成屏幕边缘闪现）。
- * 远距处理：按物理深度（未受渲染期风场扰动）越过远平面（cameraZ + 1000）
- * 后平滑淡出，在盒子世界 z 下限（cameraZ - zMin）处完全透明——此后所有
- * z/x/y 环绕都在不可见区域发生，消除远距小粒子凭空消失 / 凭空冒出 /
- * 远距闪现；用物理深度使渐隐不随风场摆动，避免透明度"呼吸"。
+ * 深度门控：物理在相机后方、或预测位置已越过镜头的粒子恒不可见——后者若不
+ * 拦下，z 环绕会先把它丢到远平面、近距渐隐随即失效，于是以满透明度闪现。
+ * 远距处理：按预测深度越过远平面（cameraZ + 1000）后平滑淡出，在盒子世界
+ * z 下限（cameraZ - zMin）处完全透明——此后所有 z/x/y 环绕都在不可见区域
+ * 发生，消除远距小粒子凭空消失 / 凭空冒出 / 远距闪现。
+ * 视锥门控：仅覆盖 billboard 屏幕半径与少量外推余量，不再补偿渲染期风场位移。
  *
  * @constant {string}
  */
 const VERTEX_SHADER = /* wgsl */ `
 struct Particle {
-  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：湍流摆动相位
-  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流摆动幅度
+  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：粒子局部模拟时钟
+  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流幅度
 }
 
 // 注意：此结构必须与片元着色器中的 Uniforms 完全一致（两者共用同一 binding）。
@@ -128,7 +182,7 @@ struct Uniforms {
   particleRadius: f32,
   pink:           f32,
   extrapFactor:   f32,   // speedFactor × (accum / FIXED_STEP)，0 时不外推
-  time:           f32,   // 渲染期时间（秒），用于轨迹增强
+  extrapPhase:    f32,   // (accum / FIXED_STEP) / 60：分数步对应的相位增量
   worldHalf:      f32,   // 动态世界 x 半宽（由 JS 根据视锥计算）
   worldSize:      f32,   // 动态世界 x 总宽
   yHalf:          f32,   // 盒子世界：y 半高
@@ -139,11 +193,35 @@ struct Uniforms {
 // 近距处理常量：屏幕半径封顶（物理像素）与近距渐隐距离（世界单位）
 const MAX_SR: f32 = 48.0;
 const NEAR_DIST: f32 = 35.0;
+const TIME_WRAP: f32 = 628.3185307179587; // 与 compute shader 相同的 200π 周期
 
-// 轨迹增强的最大位移（world units），用于视锥横向门控的渐隐带宽：
-// 横向 swayX(±50) + windX(±58) ≈ ±110；纵向 swayY ≈ ±16
-const WIND_SWAY_X: f32 = 110.0;
-const SWAY_Y: f32 = 16.0;
+fn wrapRange(value: f32, minValue: f32, maxValue: f32) -> f32 {
+  let range = maxValue - minValue;
+  return value - range * floor((value - minValue) / range);
+}
+
+fn swayX(phase: f32, amplitude: f32) -> f32 {
+  return (sin(phase * 2.0) * 26.0 + sin(phase) * 16.0) * amplitude;
+}
+
+fn swayY(phase: f32, amplitude: f32) -> f32 {
+  return cos(phase * 2.2) * 13.0 * amplitude;
+}
+
+fn gustPulse(phase: f32) -> f32 {
+  return 0.55 + 0.45 * sin(phase * 0.18 + 2.0);
+}
+
+fn windXOffset(x: f32, y: f32, phase: f32) -> f32 {
+  let wind = sin(x * 0.006 + phase * 0.8 + 1.3) * 16.0
+           + sin(y * 0.005 - phase * 0.35 + 0.7) * 20.0
+           + sin((x + y) * 0.0025 - phase * 0.12) * 22.0;
+  return wind * gustPulse(phase);
+}
+
+fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
+  return sin(x * 0.0035 + y * 0.0035 + phase * 0.25) * 45.0 * gustPulse(phase);
+}
 
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform>       u:         Uniforms;
@@ -171,96 +249,80 @@ fn main(
 ) -> VertexOut {
   let p = particles[i];
 
-  // —— 时间外推 ——
-  var px = p.posX + p.velX * u.extrapFactor;
-  var py = p.posY + p.velY * u.extrapFactor;
-  var pz = p.posZ + p.velZ * u.extrapFactor;
+  // —— 物理状态外推 ——
+  // 固定步长之间的少量剩余时间也按同一套风场位移差外推，保持高刷新率平滑；
+  // 这只是对下一小段物理运动的预测，不是独立的视觉位移。
+  let phase0 = p._p0;
+  let phase1 = wrapRange(phase0 + u.extrapPhase, 0.0, TIME_WRAP);
+  // 与 compute shader 相同的近处收敛系数（同一表达式、同一 p.posZ）。
+  let nearScale = clamp((u.cameraZ - p.posZ) / 500.0, 0.35, 1.0);
+  let deltaSwayX = (swayX(phase1, p._p1) - swayX(phase0, p._p1)) * nearScale;
+  let deltaSwayY = (swayY(phase1, p._p1) - swayY(phase0, p._p1)) * nearScale;
+  let deltaWindX = (windXOffset(p.posX, p.posY, phase1)
+                  - windXOffset(p.posX, p.posY, phase0)) * nearScale;
+  let deltaWindZ = (windZOffset(p.posX, p.posY, phase1)
+                  - windZOffset(p.posX, p.posY, phase0)) * nearScale;
+  var px = p.posX + p.velX * u.extrapFactor + deltaSwayX + deltaWindX;
+  var py = p.posY + p.velY * u.extrapFactor + deltaSwayY;
+  var pz = p.posZ + p.velZ * u.extrapFactor + deltaWindZ;
 
-  // 边界环绕（与 compute shader 一致：x/y/z 各自的范围）
-  if (py < -u.yHalf) { py += 2.0 * u.yHalf; }
-  if (px > u.worldHalf) {
-    px -= u.worldSize;
-  } else if (px < -u.worldHalf) {
-    px += u.worldSize;
-  }
-  if (pz > u.zMax) {
-    pz -= u.zMax - u.zMin;
-  } else if (pz < u.zMin) {
-    pz += u.zMax - u.zMin;
-  }
+  // 环绕之前的预测深度。可见性门控用预测深度，而不是缓冲区里尚未外推的
+  // p.posZ：否则预测已越过 zMax（跑到镜头后）的粒子会先被环绕丢到远平面，
+  // 再被基于 p.posZ 的门控判为"在镜头前"，以满透明度在远平面闪现。
+  let predDist = u.cameraZ - pz;
 
-  // —— 轨迹增强（仅渲染期，不改动物理缓冲）——
-  let t = u.time;
-  // 单片湍流：两路正弦叠加，每片雪花独立相位 / 幅度（个体差异）
-  let swayX = (sin(t * 2.0 + p._p0) * 26.0
-             + sin(t * 1.0 + p._p0 * 1.71) * 16.0) * p._p1;
-  let swayY = cos(t * 2.2 + p._p0) * 13.0 * p._p1;
-
-  // 阵风脉冲：周期约 35s，整体风力"一阵一阵"
-  let gustPulse = 0.55 + 0.45 * sin(t * 0.18 + 2.0);
-
-  // 空间采样风场：相位随粒子位置变化（行波），不同区域风向不同
-  let wind =
-      sin(px * 0.006 + t * 0.8 + 1.3) * 16.0
-    + sin(py * 0.005 - t * 0.35 + 0.7) * 20.0
-    + sin((px + py) * 0.0025 - t * 0.12) * 22.0;
-  let windX = wind * gustPulse;
-
-  // 深度风：前后方向的缓慢飘移，增强立体感
-  let windZ = sin(px * 0.0035 + py * 0.0035 + t * 0.25) * 45.0 * gustPulse;
-
-  // 近处雪花适当收敛，避免贴脸时过于剧烈
-  let nearScale = clamp((u.cameraZ - pz) / 500.0, 0.35, 1.0);
-  px += (swayX + windX) * nearScale;
-  py += swayY * nearScale;
-  pz += windZ * nearScale;
+  // 与 compute shader 完全一致的模运算式环绕，处理外推越界和新尺寸下的旧状态。
+  let rangeX = 2.0 * u.worldHalf;
+  let rangeY = 2.0 * u.yHalf;
+  let rangeZ = u.zMax - u.zMin;
+  px = px - rangeX * floor((px + u.worldHalf) / rangeX);
+  py = py - rangeY * floor((py + u.yHalf) / rangeY);
+  pz = pz - rangeZ * floor((pz - u.zMin) / rangeZ);
 
   let dist = u.cameraZ - pz;
 
   var out: VertexOut;
   out.uv = UV[v];
 
-  // 近距渐隐：dist < NEAR_DIST 的粒子 alpha 平滑衰减至 0（镜头前"化开"）。
-  // 相机后方（dist <= 0）同样 fade = 0，天然不可见。
-  var fade: f32 = 1.0;
-  if (dist <= NEAR_DIST) {
-    fade = smoothstep(0.0, NEAR_DIST, dist);
-  }
-
-  // 物理深度门控：物理上在相机后方（含 z 环绕落点 +1001）的粒子恒不可见。
-  // 渲染期风场（windZ ±45×gustPulse）可能把渲染深度推到镜头前，使环绕
-  // 到达的粒子在阵风峰值时以满透明度闪现——近距渐隐无法覆盖这种情况
-  // （渲染深度 > NEAR_DIST 时它不生效），必须用物理深度做可见性兜底。
+  // 深度门控（二者取一即不可见）：
+  // ① physDist <= 0：物理上在相机后方（含 z 环绕落点）的粒子恒不可见——
+  //    迎面风可能把渲染深度推到镜头前，需要这条兜底；
+  // ② predDist <= 0：预测位置已越过镜头。此时环绕会把该粒子丢到远平面，
+  //    dist 变成远距值、近距渐隐不生效，必须在此拦下，否则它以满透明度闪现。
   let physDist = u.cameraZ - p.posZ;
-  if (physDist <= 0.0) {
+  var fade: f32 = 1.0;
+  if (physDist <= 0.0 || predDist <= 0.0) {
     fade = 0.0;
+  } else {
+    // 近距渐隐：dist < NEAR_DIST 的粒子 alpha 平滑衰减至 0（镜头前"化开"）。
+    if (dist <= NEAR_DIST) {
+      fade = smoothstep(0.0, NEAR_DIST, dist);
+    }
+
+    // 远距渐隐：按预测深度越过远平面（cameraZ + 1000，即 JS 侧 MAX_DIST）
+    // 后平滑淡出，到世界 z 下限对应的深度（cameraZ - zMin，盒子世界远端
+    // 环绕平面）时完全透明。该深度之后所有环绕（z 环绕落点、x/y 环绕）都
+    // 发生在屏外或已完全淡出——消除：① 远距粒子 z 环绕瞬移到相机后方
+    // （凭空消失）；② 相机后方粒子 z 环绕落到远距可见区（凭空冒出）；
+    // ③ 远距 x/y 环绕在屏内闪现。
+    // 用预测深度：风场已进入物理位置，渐隐跟随真实轨迹，不再需要"必须用
+    // 未受扰动的物理深度，否则透明度随风场呼吸"的旧约束。
+    let farFadeStart = u.cameraZ + 1000.0;
+    if (predDist > farFadeStart) {
+      fade *= 1.0 - smoothstep(farFadeStart, u.cameraZ - u.zMin, predDist);
+    }
   }
 
-  // 远距渐隐基于物理深度（physDist，未受渲染期风场扰动）：越过远平面
-  // （cameraZ + 1000，即 JS 侧 MAX_DIST）后平滑淡出，到世界 z 下限对应的
-  // 深度（cameraZ - zMin，盒子世界远端环绕平面）时完全透明。该深度之后
-  // 所有环绕（z 环绕落点、x/y 环绕）都发生在屏外或已完全淡出——消除：
-  // ① 远距粒子 z 环绕瞬移到相机后方（凭空消失）；② 相机后方粒子 z 环绕
-  // 落到远距可见区（凭空冒出）；③ 远距 x/y 环绕在屏内闪现。
-  // 必须用物理深度而非渲染深度：windZ（±45 世界单位）会使渲染深度在
-  // 渐隐带内来回穿越，造成透明度"呼吸"（半透明 → 清晰 → 半透明）。
-  let farFadeStart = u.cameraZ + 1000.0;
-  if (physDist > farFadeStart) {
-    fade *= 1.0 - smoothstep(farFadeStart, u.cameraZ - u.zMin, physDist);
+  // 视锥门控只需覆盖 billboard 本身的屏幕半径（再加少量外推余量）；
+  // 风场已进入物理位置，不再需要用 ±110 世界单位的宽渐隐带来掩盖渲染/物理不一致。
+  let halfW = predDist * u.screenW / (2.0 * u.focalLength);
+  let halfH = predDist * u.screenH / (2.0 * u.focalLength);
+  let edgeMargin = max(12.0, MAX_SR * max(predDist, 0.0) / max(u.focalLength, 1.0) + 8.0);
+  if (abs(px) > halfW) {
+    fade *= 1.0 - smoothstep(halfW, halfW + edgeMargin, abs(px));
   }
-
-  // 视锥横向门控：物理位置在视锥横向范围之外时，渲染期风场/湍流摆动
-  // （横向最多 ±110 世界单位、纵向 ±16）可能把渲染位置推入屏内，风一转
-  // 又瞬间离开——按物理横向越界量渐隐（渐隐带宽 = 风场最大位移），越界
-  // 粒子在风场可触及的范围内已完全透明，屏幕边缘的闪现消失。物理越界
-  // 粒子本就渲染在屏外，此门控不影响正常可见粒子。
-  let halfW = physDist * u.screenW / (2.0 * u.focalLength);
-  let halfH = physDist * u.screenH / (2.0 * u.focalLength);
-  if (abs(p.posX) > halfW) {
-    fade *= 1.0 - smoothstep(halfW, halfW + WIND_SWAY_X, abs(p.posX));
-  }
-  if (abs(p.posY) > halfH) {
-    fade *= 1.0 - smoothstep(halfH, halfH + SWAY_Y, abs(p.posY));
+  if (abs(py) > halfH) {
+    fade *= 1.0 - smoothstep(halfH, halfH + edgeMargin, abs(py));
   }
   out.fade = fade;
 
@@ -307,7 +369,7 @@ struct Uniforms {
   particleRadius: f32,
   pink:           f32,
   extrapFactor:   f32,  // 顶点着色器专用，此处不读取
-  time:           f32,  // 顶点着色器专用，此处不读取
+  extrapPhase:    f32,  // 顶点着色器专用，此处不读取
   worldHalf:      f32,  // 顶点着色器专用，此处不读取
   worldSize:      f32,  // 顶点着色器专用，此处不读取
   yHalf:          f32,  // 顶点着色器专用，此处不读取
@@ -396,11 +458,12 @@ let _renderBG_1 = null;
 
 /**
  * Compute uniform 共用缓冲区（Float32Array 视图）。
- * 布局：[speedFactor, worldHalf, worldSize, yHalf, zMin, zMax, count(u32)]
+ * 布局：[speedFactor, worldHalf, worldSize, yHalf, zMin, zMax, cameraZ, count(u32)]
+ * 共 8 个字段 → 32 字节（count 为 u32，仍占 4 字节）。
  *
  * @type {Float32Array}
  */
-const _computeUniformData = new Float32Array(7);
+const _computeUniformData = new Float32Array(8);
 
 /**
  * Compute uniform 共用缓冲区的 Uint32Array 视图（用于写入 u32 count 字段）。
@@ -411,7 +474,7 @@ const _computeUniformU32 = new Uint32Array(_computeUniformData.buffer);
 
 /**
  * Render uniform 共用缓冲区（Float32Array 视图）。
- * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, time, worldHalf, worldSize, yHalf, zMin, zMax]
+ * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, worldSize, yHalf, zMin, zMax]
  * 共 13 个 f32 → 52 字节。
  *
  * @type {Float32Array}
@@ -420,8 +483,9 @@ const _renderUniformData = new Float32Array(13);
 
 /**
  * 每帧 render uniform 临时缓冲区（两个 f32，写入 offset 24）：
- * [extrapFactor, time(秒)]。time 供顶点着色器渲染期轨迹增强使用。
- *
+ * [extrapFactor, extrapPhase]——前者外推基础速度、后者外推风场相位，都对应
+ * 同一段"剩余分数步"（extrapFactor = speedFactor × 分数步，
+ * extrapPhase = 分数步 / 60），由 handleFrame 每帧成对写入。
  * @type {Float32Array}
  */
 const _extrapData = new Float32Array(2);
@@ -586,14 +650,11 @@ function _updateWorldSize() {
   WORLD_SIZE = WORLD_HALF * 2;
 
   // 盒子世界：y/z 不再跟随 x 走满整个世界。
-  // farFadeEnd = 远距渐隐终点。理论值 = 世界 x 边界与视锥相交的临界深度，
-  // 但顶点着色器的渲染期风场/湍流摆动会使粒子的渲染位置横向偏移最多
-  // ~110 世界单位（swayX ±50 + windX ±58），因此再扣减 WIND_MARGIN——
-  // 保证 x 环绕的渲染落点（±WORLD_HALF ± 风场偏移）在渐隐完成时仍落在
-  // 屏外，消除远距屏幕边缘的淡粒子闪现/跳动（竖屏时受最大可见距离约束）。
-  const WIND_MARGIN = 115;
+  // farFadeEnd = 远距渐隐终点。保留 115 世界单位的屏外缓冲，确保边界环绕
+  // 与 billboard 的边缘渐隐带均发生在可见视锥之外，减少边缘闪现。
+  const EDGE_MARGIN = 115;
   const farFadeEnd = Math.min(
-    ((WORLD_HALF - WIND_MARGIN) * 2 * _focalLength) / W,
+    ((WORLD_HALF - EDGE_MARGIN) * 2 * _focalLength) / W,
     CAMERA_Z + WORLD_HALF,
   );
   // y 半高：远 fade 终点处视锥半高 × 1.1 余量，保证 y 环绕始终在屏外
@@ -615,7 +676,7 @@ function _updateWorldSize() {
  * 初始位置在世界盒子内均匀随机分布（x ∈ ±WORLD_HALF，y ∈ ±Y_HALF，
  * z ∈ [Z_MIN, Z_MAX]），
  * 初始速度以 baseVy 为基础做锥形扩散（模拟雪花飘落）。
- * _p0 / _p1 为渲染期湍流摆动的独立相位与幅度（个体差异）。
+ * _p0 / _p1 分别为粒子局部模拟时钟的初始相位与湍流幅度（个体差异）。
  *
  * @param {number} n - 要生成的粒子数量。
  * @returns {Float32Array} 粒子数据（长度 n × 8）。
@@ -738,7 +799,7 @@ function _rebuildBindGroups() {
 /**
  * 将 compute uniform 数据写入 GPU 缓冲区。
  *
- * 布局：[speedFactor: f32, worldHalf: f32, worldSize: f32, yHalf: f32, zMin: f32, zMax: f32, count: u32]
+ * 布局：[speedFactor: f32, worldHalf: f32, worldSize: f32, yHalf: f32, zMin: f32, zMax: f32, cameraZ: f32, count: u32]
  *
  * @returns {void}
  */
@@ -750,15 +811,17 @@ function _writeComputeUniforms() {
   _computeUniformData[3] = Y_HALF;
   _computeUniformData[4] = Z_MIN;
   _computeUniformData[5] = Z_MAX;
-  _computeUniformU32[6] = _count;
+  _computeUniformData[6] = CAMERA_Z;
+  _computeUniformU32[7] = _count;
   _queue.writeBuffer(_computeUniformBuf, 0, _computeUniformData);
 }
 
 /**
  * 将 render uniform 数据写入 GPU 缓冲区。
  *
- * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, time, worldHalf, worldSize, yHalf, zMin, zMax]
- * extrapFactor 与 time 不在此函数中写入，由 handleFrame 每帧单独更新（offset 24）。
+ * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, worldSize, yHalf, zMin, zMax]
+ * extrapFactor 与 extrapPhase 不在此函数中更新，由 handleFrame 每帧单独写入
+ * （offset 24，两个 f32）。
  *
  * @returns {void}
  */
@@ -771,7 +834,7 @@ function _writeRenderUniforms() {
   _renderUniformData[4] = PARTICLE_RADIUS;
   _renderUniformData[5] = _pink ? 1.0 : 0.0;
   _renderUniformData[6] = 0;   // extrapFactor（每帧覆盖）
-  _renderUniformData[7] = 0;   // time（每帧覆盖）
+  _renderUniformData[7] = 0;   // extrapPhase（每帧覆盖）
   _renderUniformData[8] = WORLD_HALF;
   _renderUniformData[9] = WORLD_SIZE;
   _renderUniformData[10] = Y_HALF;
@@ -874,7 +937,7 @@ async function _initGPU() {
     });
 
     _computeUniformBuf = _device.createBuffer({
-      size: 28,  // 7 个 f32
+      size: 32,  // 8 个字段（cameraZ + u32 count）
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     _renderUniformBuf = _device.createBuffer({
@@ -994,10 +1057,10 @@ function handleFrame(timestamp) {
       _currentSrc = src;
     }
 
-    // 高精度时间：取模 200π，保证所有 sin 频率周期对齐，避免 f32 精度退化。
-    const TIME_WRAP = 200 * Math.PI;
+    // extrapFactor：基础速度的分数步外推；
+    // extrapPhase：同一分数步对应的风场相位增量（整步为 1/60 相位 = 1 秒）。
     _extrapData[0] = _speedFactor * (_accum / FIXED_STEP);
-    _extrapData[1] = (timestamp / 1000) % TIME_WRAP;
+    _extrapData[1] = _accum / FIXED_STEP / 60;
     _queue.writeBuffer(_renderUniformBuf, 24, _extrapData);
 
     _colorAttachment.view = _context.getCurrentTexture().createView();
