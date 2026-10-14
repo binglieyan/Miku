@@ -193,6 +193,9 @@ const MAX_SR: f32 = 48.0;
 const NEAR_DIST: f32 = 35.0;
 const TIME_WRAP: f32 = 628.3185307179587; // 与 compute shader 相同的 200π 周期
 
+// 远距渐隐带的最小宽度（世界单位）：保证 smoothstep 的 edge0 < edge1 恒成立。
+const MIN_FAR_FADE: f32 = 32.0;
+
 fn wrapRange(value: f32, minValue: f32, maxValue: f32) -> f32 {
   let range = maxValue - minValue;
   return value - range * floor((value - minValue) / range);
@@ -305,9 +308,15 @@ fn main(
     // ③ 远距 x/y 环绕在屏内闪现。
     // 用预测深度：风场已进入物理位置，渐隐跟随真实轨迹，不再需要"必须用
     // 未受扰动的物理深度，否则透明度随风场呼吸"的旧约束。
-    let farFadeStart = u.cameraZ + 1000.0;
+    // 起点取 MAX_DIST（cameraZ + 1000）与"远端环绕面前 MIN_FAR_FADE"中的较小值：
+    // 前者是设计上的最远可见距离，后者保证 smoothstep 的 edge0 < edge1。现行
+    // 世界参数下 farFadeEnd 恒大于 MAX_DIST（见 _updateWorldSize 的不变量），
+    // 所以这里取到的始终是 MAX_DIST；万一将来常量被调坏，也只是把渐隐带压窄，
+    // 不会退化成 edge0 > edge1 的未定义行为。
+    let farFadeEnd = u.cameraZ - u.zMin;
+    let farFadeStart = min(u.cameraZ + 1000.0, farFadeEnd - MIN_FAR_FADE);
     if (predDist > farFadeStart) {
-      fade *= 1.0 - smoothstep(farFadeStart, u.cameraZ - u.zMin, predDist);
+      fade *= 1.0 - smoothstep(farFadeStart, farFadeEnd, predDist);
     }
   }
 
@@ -593,6 +602,23 @@ let _accum = 0;
 /** @type {?number} requestAnimationFrame 句柄。非 null 表示循环处于运行态。 */
 let _rafId = null;
 
+/* ——— 设备初始化 / 重试 ————————————————————— */
+
+/** @type {number} 设备初始化尝试次数（含首次），用于给丢失后的重试封顶。 */
+let _initAttempts = 0;
+
+/** @type {?number} 设备丢失后的重试定时器句柄。 */
+let _retryTimer = null;
+
+/** @type {boolean} _initGPU 的重入保护。 */
+let _initializing = false;
+
+/** @type {number} 设备丢失后允许的最大初始化尝试次数（含首次）。 */
+const MAX_INIT_ATTEMPTS = 3;
+
+/** @type {number} 设备丢失后的重试间隔（ms）。 */
+const RETRY_DELAY_MS = 2000;
+
 /* ————————————————————————————————————————————
  *  工具函数
  * ———————————————————————————————————————————— */
@@ -618,15 +644,67 @@ function randomRange(min, max) {
  * 都能真正终止循环——修复了原先"cancel 之后 frameLoop 又 request"
  * 导致循环无法停下、以空设备状态无限空转的问题。
  *
+ * 同时释放对 GPU 资源的引用：绑定组 / 管线 / 缓冲区各自都持有 device 引用，
+ * 只置空 _device 会让整张失效设备图保持可达。重试时 _initGPU 会重建它们。
+ *
  * @returns {void}
  */
 function _shutdown() {
   _device = null;
   _queue = null;
+  // 一并置空对失效设备的引用（含上下文：重试时 canvas.getContext('webgpu')
+  // 返回同一个上下文对象，无需保留旧引用）。
+  _context = null;
+  _buf0 = null;
+  _buf1 = null;
+  _computePipeline = null;
+  _renderPipeline = null;
+  _computeUniformBuf = null;
+  _renderUniformBuf = null;
+  _computeBG_AB = null;
+  _computeBG_BA = null;
+  _renderBG_0 = null;
+  _renderBG_1 = null;
   if (_rafId !== null) {
     cancelAnimationFrame(_rafId);
     _rafId = null;
   }
+}
+
+/**
+ * 安排一次设备重试（只用于设备丢失后的恢复）。
+ *
+ * 设备丢失（驱动重置、切换独显/核显、DWM 重置等）通常是瞬态的，
+ * 重新 requestAdapter + requestDevice 一般能拿回一个新设备；而
+ * uncapturederror（校验错误）是确定性的，重试必然复现，因此不走这里。
+ * 尝试次数以 MAX_INIT_ATTEMPTS 封顶、间隔 RETRY_DELAY_MS，避免无限重试刷屏。
+ *
+ * @returns {void}
+ */
+function _scheduleRetry() {
+  if (_retryTimer !== null) return;
+  if (_initAttempts >= MAX_INIT_ATTEMPTS) {
+    console.warn(
+      '[particles] 设备丢失后重试 ' + _initAttempts + ' 次仍未恢复，停止重试，回退到纯 CSS 背景',
+    );
+    return;
+  }
+  _retryTimer = setTimeout(function () {
+    _retryTimer = null;
+    void _initGPU();
+  }, RETRY_DELAY_MS);
+}
+
+/**
+ * 初始化失败时的统一出口：致停；若本次已经是重试（_initAttempts > 1，
+ * 说明首帧初始化曾经成功过），再安排下一次重试——首帧就失败的机器
+ * （例如根本没有 WebGPU）不重试，避免无意义地反复尝试。
+ *
+ * @returns {void}
+ */
+function _abortInit() {
+  _shutdown();
+  if (_initAttempts > 1) _scheduleRetry();
 }
 
 /**
@@ -655,6 +733,11 @@ function _updateWorldSize() {
     ((WORLD_HALF - EDGE_MARGIN) * 2 * _focalLength) / W,
     CAMERA_Z + WORLD_HALF,
   );
+  // 不变量：farFadeEnd > MAX_DIST，否则着色器里的远距渐隐会变成 edge0 > edge1。
+  // 现行参数下恒成立——WORLD_HALF 有 2000 硬下限、又乘了 1.1 余量，把上式
+  // 化简后横屏约为 2200 − 150/aspect、竖屏不小于 2457，故任意宽高比下
+  // farFadeEnd ≥ ≈2073，比 MAX_DIST = 2000 至少宽 73 世界单位。
+  // 着色器端另有 MIN_FAR_FADE 兜底，常量被调坏时也不会出现未定义行为。
   // y 半高：远 fade 终点处视锥半高 × 1.1 余量，保证 y 环绕始终在屏外
   Y_HALF = Math.ceil(Math.tan(FOV / 2) * farFadeEnd * 1.1);
   // z 范围：可见深度带 [cameraZ - farFadeEnd, cameraZ] + 相机后 1 单位环绕落点
@@ -817,8 +900,8 @@ function _writeComputeUniforms() {
  * 将 render uniform 数据写入 GPU 缓冲区。
  *
  * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, yHalf, zMin, zMax]
- * extrapFactor 与 extrapPhase 不在此函数中更新，由 handleFrame 每帧单独写入
- * （offset 24，两个 f32）。
+ * extrapFactor 与 extrapPhase 在这里写入**当前值**（属性回调可能发生在帧间，
+ * 缓冲区任何时刻都应自洽），handleFrame 每帧再用最新值覆盖 offset 24 的两个 f32。
  *
  * @returns {void}
  */
@@ -830,8 +913,9 @@ function _writeRenderUniforms() {
   _renderUniformData[3] = H;
   _renderUniformData[4] = PARTICLE_RADIUS;
   _renderUniformData[5] = _pink ? 1.0 : 0.0;
-  _renderUniformData[6] = 0;   // extrapFactor（每帧覆盖）
-  _renderUniformData[7] = 0;   // extrapPhase（每帧覆盖）
+  // extrapFactor / extrapPhase：写入当前值（handleFrame 每帧刷新这两个字段）
+  _renderUniformData[6] = _speedFactor * (_accum / FIXED_STEP);
+  _renderUniformData[7] = _accum / FIXED_STEP / 60;
   _renderUniformData[8] = WORLD_HALF;
   _renderUniformData[9] = Y_HALF;
   _renderUniformData[10] = Z_MIN;
@@ -859,6 +943,25 @@ function _guard(value, message) {
 }
 
 /**
+ * 设备初始化入口：重入保护 + 尝试计数；实际工作见 _initGPUResources()。
+ *
+ * 设备丢失后的重试（_scheduleRetry）也走这里，因此首帧初始化与重试共用
+ * 同一条路径，不存在两套初始化逻辑。
+ *
+ * @returns {Promise<void>}
+ */
+async function _initGPU() {
+  if (_initializing || _device) return;
+  _initializing = true;
+  _initAttempts++;
+  try {
+    await _initGPUResources();
+  } finally {
+    _initializing = false;
+  }
+}
+
+/**
  * 初始化 WebGPU 设备、管线、缓冲区。
  *
  * 异步获取 GPUAdapter → GPUDevice，创建 compute + render pipeline，
@@ -868,14 +971,16 @@ function _guard(value, message) {
  * 期间发生 resize 后，用启动时的旧尺寸覆盖新尺寸的竞态。
  *
  * 任何失败路径（无 WebGPU 支持、adapter 获取失败、设备创建失败、
- * 上下文/管线/缓冲区创建异常、uncapturederror）均经 _shutdown() 置空
- * _device 并停止可能已在运行的 rAF 循环，此时 CSS 背景层仍持续可见。
+ * 上下文/管线/缓冲区创建异常、uncapturederror）均经 _shutdown() 释放设备
+ * 并停止可能已在运行的 rAF 循环，此时 CSS 背景层仍持续可见。
+ * 设备获取与资源创建类失败走 _abortInit()：重试过程中的失败会再安排一次
+ * 重试，首帧就失败（例如机器本就没有 WebGPU）则不再重试。
  *
  * @returns {Promise<void>}
  */
-async function _initGPU() {
+async function _initGPUResources() {
   if (typeof navigator === 'undefined' || !navigator.gpu) {
-    _shutdown();
+    _abortInit();
     return;
   }
 
@@ -886,32 +991,42 @@ async function _initGPU() {
     // 中为 wallpaper32.exe / webwallpaper32.exe 指定高性能或节能 GPU。
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) {
-      _shutdown();
+      _abortInit();
       return;
     }
     const device = await adapter.requestDevice();
     if (!device) {
-      _shutdown();
+      _abortInit();
       return;
     }
     _device = device;
   } catch {
-    _shutdown();
+    _abortInit();
     return;
   }
 
   _queue = _device.queue;
+  // 本次创建的设备实例：下面两道监听都以它为准（device 是 try 块内的局部量，
+  // 出了块就不可见，所以必须在这里用函数作用域的量捕获）。
+  const thisDevice = _device;
 
-  // 设备丢失（驱动重置 / 页面抢占等）：停止循环，回退纯 CSS 背景。
+  // 设备丢失（驱动重置 / 切换独显核显 / DWM 重置 / 页面抢占等）：先致停，
+  // 再安排一次有上限的重试——这类丢失通常是瞬态的，重新取设备即可恢复。
+  // 两道监听都以本次创建的 device 为准：重试成功后旧设备的迟到事件不得影响
+  // 新设备（否则一个迟到的校验错误会把刚恢复的设备再打掉）。
   _device.lost.then(function (info) {
+    if (_device !== thisDevice) return;
     console.warn('[particles] WebGPU 设备丢失:', info.reason, info.message);
     _shutdown();
+    _scheduleRetry();
   });
 
   // GPU 校验错误（submit/dispatch 等）不会抛 JS 异常，只走 uncapturederror
   // 事件——原先的 try/catch 抓不到这类错误。此处监听并统一致停，
   // 兑现"任何 GPU 异常停止循环"的行为约定，同时避免每帧重复报错刷屏。
+  // 校验错误是确定性的，重试必然复现，因此这里不做重试。
   _device.addEventListener('uncapturederror', function (ev) {
+    if (_device !== thisDevice) return;
     console.warn('[particles] 未捕获的 GPU 错误，粒子已停止:', ev.error);
     _shutdown();
   });
@@ -985,8 +1100,11 @@ async function _initGPU() {
     });
 
     _createParticleBuffers();
-    _uploadFreshParticleData();
+    // 先按当前 canvas 尺寸定好世界，再播种粒子：异步初始化期间若发生过
+    // resize，这里算出的才是这颗 canvas 真正要用的盒子。世界尺寸只由宽高比
+    // 决定，因此同比例换分辨率（1080p → 4K）不改变任何边界。
     _updateWorldSize();
+    _uploadFreshParticleData();
 
     // 竞态兜底：settings.js 在模块加载时（设备就绪前）就调用了 start()，
     // 彼时 _device 为 null 会被跳过——若不在设备就绪后重启循环，帧循环
@@ -994,7 +1112,7 @@ async function _initGPU() {
     start();
   } catch (err) {
     console.warn('[particles] GPU 初始化失败，回退到纯 CSS 背景:', err);
-    _shutdown();
+    _abortInit();
   }
 }
 
@@ -1131,32 +1249,75 @@ function _clearParticles() {
 /** @type {?number} resize 防抖定时器句柄。 */
 let _resizeTimer = null;
 
+/** @type {?MediaQueryList} 当前 devicePixelRatio 对应的媒体查询。 */
+let _dprQuery = null;
+
 /**
- * 窗口 resize 事件处理（150ms 防抖）。
+ * 按当前窗口尺寸与 devicePixelRatio 重建 canvas backing store。
  *
- * 重新计算 canvas backing store（含 devicePixelRatio），
- * 更新投影焦距并重新写入 render uniform。
- * GPU 尚未就绪时 _writeRenderUniforms 自行跳过，且 _initGPU
- * 就绪时读取的是 canvas 当前尺寸，故异步初始化期间 resize 不丢失。
+ * 重新计算画布物理分辨率与投影焦距，并重算世界尺寸。
+ * GPU 尚未就绪时 uniform 写入自行跳过，且 _initGPU 就绪时读取的是 canvas
+ * 当前尺寸，故异步初始化期间 resize 不丢失。
  *
  * @returns {void}
  */
-window.addEventListener('resize', function () {
+function _applyCanvasSize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = Math.max(1, Math.floor(window.innerWidth * dpr));
+  H = Math.max(1, Math.floor(window.innerHeight * dpr));
+  canvas.width = W;
+  canvas.height = H;
+  _focalLength = H / (2 * Math.tan(FOV / 2));
+  _updateWorldSize();
+}
+
+/**
+ * 防抖地重建画布（150ms），并按新的 dpr 重新挂载监听。
+ *
+ * @returns {void}
+ */
+function _scheduleCanvasRebuild() {
   if (_resizeTimer !== null) clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(function () {
     _resizeTimer = null;
-    const dpr = window.devicePixelRatio || 1;
-    const newW = Math.max(1, Math.floor(window.innerWidth * dpr));
-    const newH = Math.max(1, Math.floor(window.innerHeight * dpr));
-
-    W = newW;
-    H = newH;
-    canvas.width = W;
-    canvas.height = H;
-    _focalLength = H / (2 * Math.tan(FOV / 2));
-    _updateWorldSize();
+    _applyCanvasSize();
+    _watchDevicePixelRatio();
   }, 150);
+}
+
+/**
+ * dpr 变化回调（跨屏迁移 / 系统缩放调整）。
+ *
+ * @returns {void}
+ */
+function _onDprChange() {
+  _scheduleCanvasRebuild();
+}
+
+/**
+ * 为当前 devicePixelRatio 挂一次变化监听。
+ *
+ * 只改 dpr、不改 innerWidth/innerHeight 时（把壁纸拖到另一种缩放比的显示器，
+ * 或调整系统缩放），部分浏览器不派发 resize，只让
+ * matchMedia('(resolution: Xdppx)') 变化——那样画布不会重建，壁纸会保持模糊。
+ * 这里为当前 dpr 挂监听，触发后走同一段重建逻辑，并按新 dpr 重新挂载
+ * （媒体查询里的 dppx 值必须跟着更新）。
+ *
+ * @returns {void}
+ */
+function _watchDevicePixelRatio() {
+  if (typeof window.matchMedia !== 'function') return;
+  if (_dprQuery) _dprQuery.removeEventListener('change', _onDprChange);
+  const dpr = window.devicePixelRatio || 1;
+  _dprQuery = window.matchMedia('(resolution: ' + dpr + 'dppx)');
+  _dprQuery.addEventListener('change', _onDprChange);
+}
+
+// 窗口 resize 与 dpr 变化走同一条重建路径。
+window.addEventListener('resize', function () {
+  _scheduleCanvasRebuild();
 });
+_watchDevicePixelRatio();
 
 /* ————————————————————————————————————————————
  *  公开 API
@@ -1253,15 +1414,8 @@ export function setPink(enabled) {
  *  启动
  * ———————————————————————————————————————————— */
 
-// 按屏幕物理分辨率设置 canvas backing store（多少 K 的屏就渲染多少 K）。
-const dpr = window.devicePixelRatio || 1;
-canvas.width = Math.max(1, Math.floor(window.innerWidth * dpr));
-canvas.height = Math.max(1, Math.floor(window.innerHeight * dpr));
-W = canvas.width;
-H = canvas.height;
-_focalLength = H / (2 * Math.tan(FOV / 2));
-
-// 直接调用函数完成初始世界尺寸计算（函数内部会安全处理设备未就绪的情况）
-_updateWorldSize();
+// 按屏幕物理分辨率设置 canvas backing store（多少 K 的屏就渲染多少 K），
+// 并算好焦距与世界尺寸——与 resize / dpr 变化走同一段逻辑。
+_applyCanvasSize();
 
 void _initGPU();
