@@ -107,7 +107,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   var p = src[i];
 
   // _p0 是每个粒子的局部模拟时钟（初始值随机），让湍流和风场在物理步进中
-  // 改变粒子轨迹，而不是在顶点着色器里把粒子“画”到另一个位置。
+  // 改变粒子轨迹，而不是在顶点着色器里把粒子"画"到另一个位置。
   // 相位按固定步长推进（1 相位 = 1 秒真实时间，见 PHASE_PER_STEP），不随
   // aSpeed 滑杆变化；再按共同周期折回以防 f32 精度退化。
   let phase0 = p._p0;
@@ -122,7 +122,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   // 一致。compute / vertex 用同一表达式与同一 p.posZ，保证两侧轨迹一致。
   let nearScale = clamp((u.cameraZ - p.posZ) / 500.0, 0.35, 1.0);
 
-  // 湍流、横向风、深度风都以“位移差”形式进入模拟位置，避免每帧重复叠加
+  // 湍流、横向风、深度风都以"位移差"形式进入模拟位置，避免每帧重复叠加
   // 一个绝对偏移值造成无界漂移。风场按当前物理位置采样，形成空间变化的气流。
   let deltaSwayX = (swayX(phase1, p._p1) - swayX(phase0, p._p1)) * nearScale;
   let deltaSwayY = (swayY(phase1, p._p1) - swayY(phase0, p._p1)) * nearScale;
@@ -286,9 +286,9 @@ fn main(
 
   // 深度门控（二者取一即不可见）：
   // ① physDist <= 0：物理上在相机后方（含 z 环绕落点）的粒子恒不可见——
-  //    迎面风可能把渲染深度推到镜头前，需要这条兜底；
+  // 迎面风可能把渲染深度推到镜头前，需要这条兜底；
   // ② predDist <= 0：预测位置已越过镜头。此时环绕会把该粒子丢到远平面，
-  //    dist 变成远距值、近距渐隐不生效，必须在此拦下，否则它以满透明度闪现。
+  // dist 变成远距值、近距渐隐不生效，必须在此拦下，否则它以满透明度闪现。
   let physDist = u.cameraZ - p.posZ;
   var fade: f32 = 1.0;
   if (physDist <= 0.0 || predDist <= 0.0) {
@@ -486,6 +486,7 @@ const _renderUniformData = new Float32Array(13);
  * [extrapFactor, extrapPhase]——前者外推基础速度、后者外推风场相位，都对应
  * 同一段"剩余分数步"（extrapFactor = speedFactor × 分数步，
  * extrapPhase = 分数步 / 60），由 handleFrame 每帧成对写入。
+ *
  * @type {Float32Array}
  */
 const _extrapData = new Float32Array(2);
