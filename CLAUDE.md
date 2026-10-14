@@ -78,4 +78,4 @@ The `project.json` defines the wallpaper metadata and user-adjustable properties
 
 ## Licensing
 
-Code is MIT (`LICENSE`). `images/bg.png` and `preview.jpg` are © 原画师 千夜QYS3 (Pixiv ID 7210261), used with permission — they are excluded from the MIT license; do not extract or redistribute them.
+Code is MIT (`LICENSE`). `images/bg.png` and `preview.jpg` are © 原画师 千夜QYS3 (Pixiv ID 7210261), used with permission — they are excluded from the MIT license; do not extract or redistribute them. `images/bg.png` (3840×2160) was losslessly re-compressed in-repo: 15.32 MB → 9.18 MB with pixel-identical content (verified max error 0); the only metadata change is that a meaningless `pHYs` chunk is no longer written, and the artist's original bytes remain recoverable from git history.
