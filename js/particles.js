@@ -562,7 +562,9 @@ const _renderPassDescriptor = {
  * 一帧的 GPU 开销），保留它是因为零代价、且让热路径更短；取值一律走数组解构，
  * 不要写回 colorAttachments[0] 下标访问。
  *
- * @type {GPURenderPassColorAttachment}
+ * 刻意不加类型注解：元素类型由 _renderPassDescriptor 推得，而 TypeScript 7
+ * 会把解构声明上的 JSDoc 类型套到整个模式（错误信息称元素缺少 Symbol.iterator
+ * 方法），写上反而制造一条假错误——普通数字数组同样复现，与 Iterable 无关。
  */
 const [_colorAttachment] = _renderPassDescriptor.colorAttachments;
 

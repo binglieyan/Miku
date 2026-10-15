@@ -82,7 +82,7 @@ The detailed design lives in the `js/particles.js` JSDoc, which is kept in sync 
 
 ## Editor setup
 
-`jsconfig.json` enables `checkJs` (with `strict: false`, `@webgpu/types`, `moduleResolution: "bundler"`) for IDE completions. `tsc` is not a repo dependency, and a check with TypeScript 7 currently reports two known errors, both benign: destructuring `GPURenderPassDescriptor.colorAttachments` (typed `Iterable<…>`) and the undeclared engine global `window.wallpaperPropertyListener`.
+`jsconfig.json` enables `checkJs` (with `strict: false`, `@webgpu/types`, `moduleResolution: "bundler"`) for IDE completions. `tsc` is not a repo dependency; a check with TypeScript 7 reports one known benign error (the undeclared engine global `window.wallpaperPropertyListener`). One trap: TS 7 mis-applies a JSDoc type annotation written *on a destructuring declaration* — it then reports the element type as missing an iterator, and reproduces with a plain number array — so `_colorAttachment` is deliberately left unannotated (its type is inferred). Do not "restore" that annotation.
 
 ## Licensing
 
