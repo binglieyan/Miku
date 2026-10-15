@@ -850,7 +850,7 @@ function _updateWorldSize() {
  *   [posX, posY, posZ, _p0, velX, velY, velZ, _p1]
  *
  * 初始位置在世界盒子内均匀随机分布（x ∈ ±_worldHalf，y ∈ ±_yHalf，
- * z ∈ [_zMin, _zMax]），
+ * z ∈ [_zMin, _zMax)，三条轴均为半开区间——采样用 randomRange），
  * 初始速度以 baseVy 为基础做锥形扩散（模拟雪花飘落）。
  * _p0 / _p1 分别为粒子局部模拟时钟的初始相位与湍流幅度（个体差异）。
  *
@@ -877,7 +877,7 @@ function _generateParticleData(n) {
     const vx = vz * Math.sin(ay);
     vz = vz * Math.cos(ay);
 
-    // 初始位置：三条轴分别按盒子边界均匀采样（x/y 为 ±半宽，z 为 [下限, 上限)）
+    // 初始位置：三条轴各自按盒子边界均匀采样（区间与半开约定见函数 JSDoc）。
     // 不缓存"x 总宽"这类派生量——它必须跟着半宽同步更新，多一份状态就多一个
     // 静默错位的入口。
     const off = i * 8;
@@ -1084,10 +1084,173 @@ async function _initGPU() {
 }
 
 /**
+ * 取回本次会话的 GPUDevice，并设置 _device / _queue。
+ *
+ * 不在这里打日志：拿不到设备是"这台机器跑不了 WebGPU"，重试必然复现，由调用方
+ * 统一走 _abortInit()。
+ *
+ * @returns {Promise<?GPUDevice>} 拿不到设备时返回 null。
+ */
+async function _acquireDevice() {
+  try {
+    // 注：Chromium 在 Windows 上会忽略 requestAdapter 的 powerPreference
+    // （crbug.com/369219127），GPU 由系统分配给进程，传该选项无效且打警告。
+    // 双显卡机型如需指定 GPU，请用户在 Windows「设置 → 系统 → 屏幕 → 显示卡」
+    // 中为 wallpaper32.exe / webwallpaper32.exe 指定高性能或节能 GPU。
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+      return null;
+    }
+    const device = await adapter.requestDevice();
+    if (!device) {
+      return null;
+    }
+    _device = device;
+    _queue = device.queue;
+    return device;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 为本次创建的 device 挂上两道监听。
+ *
+ * 两道监听都以传入的实例为准：重试成功后旧设备的迟到事件不得影响新设备，
+ * 否则一个迟到的校验错误会把刚恢复的设备再打掉。
+ *
+ * @param {GPUDevice} device - 本次创建的设备实例。
+ * @returns {void}
+ */
+function _wireDeviceListeners(device) {
+  // 设备丢失（驱动重置 / 切换独显核显 / DWM 重置 / 页面抢占等）：先致停，
+  // 再安排一次有上限的重试——这类丢失通常是瞬态的，重新取设备即可恢复。
+  device.lost.then((info) => {
+    if (_device !== device) {
+      return;
+    }
+    console.warn('[particles] WebGPU 设备丢失:', info.reason, info.message);
+    _shutdown();
+    // 翻转型故障限流：恢复后立刻又丢时，每轮成功都会清零 _initAttempts，重试会
+    // 以 RETRY_DELAY_MS 为周期无限重建设备（约 1800 次/小时）。窗口内丢失过频即
+    // 放弃，进入与"重试次数耗尽"相同的终态（雪花停住、CSS 背景仍在）。
+    if (_recordLossAndShouldStop(performance.now())) {
+      console.warn(
+        `[particles] ${LOSS_WINDOW_MS / 60000} 分钟内设备反复丢失，停止重试，回退到纯 CSS 背景`,
+      );
+      return;
+    }
+    _scheduleRetry();
+  });
+
+  // GPU 校验错误（submit/dispatch 等）不会抛 JS 异常，只走 uncapturederror
+  // 事件——原先的 try/catch 抓不到这类错误。此处监听并统一致停，
+  // 兑现"任何 GPU 异常停止循环"的行为约定，同时避免每帧重复报错刷屏。
+  // 校验错误是确定性的，重试必然复现，因此这里不做重试。
+  device.addEventListener('uncapturederror', (ev) => {
+    if (_device !== device) {
+      return;
+    }
+    console.warn('[particles] 未捕获的 GPU 错误，粒子已停止:', ev.error);
+    _shutdown();
+  });
+}
+
+/**
+ * 创建两个 uniform 缓冲区（compute 28 B / render 48 B）。
+ *
+ * 大小必须与 WGSL 侧 struct 一致：compute 的 Uniforms 是 7 个字段（含 u32
+ * count），render 的是 12 个 f32。字段顺序与 JS 索引写入的对应关系见
+ * _writeComputeUniforms / _writeRenderUniforms。
+ *
+ * @returns {void}
+ */
+function _createUniformBuffers() {
+  _computeUniformBuf = _device.createBuffer({
+    size: 28, // 7 个字段（cameraZ + u32 count）
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  _renderUniformBuf = _device.createBuffer({
+    size: 48, // 12 个 f32
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+}
+
+/**
+ * 创建 compute / render 两条 pipeline（含各自的着色器模块）。
+ *
+ * 着色器模块只在这里用一次，因此不做模块级状态。
+ *
+ * @returns {void}
+ */
+function _createPipelines() {
+  const computeModule = _device.createShaderModule({ code: COMPUTE_SHADER });
+  const vertexModule = _device.createShaderModule({ code: VERTEX_SHADER });
+  const fragmentModule = _device.createShaderModule({
+    code: FRAGMENT_SHADER,
+  });
+
+  _computePipeline = _device.createComputePipeline({
+    layout: 'auto',
+    compute: { module: computeModule, entryPoint: 'main' },
+  });
+  _renderPipeline = _createRenderPipeline(vertexModule, fragmentModule);
+}
+
+/**
+ * 创建 render pipeline。
+ *
+ * blend 与片元着色器的预乘 alpha 输出配套：color 与 alpha 都是
+ * srcFactor=one、dstFactor=one-minus-src-alpha，混合结果因此仍是预乘的。
+ * 顶点无缓冲区（四边形由 vertex_index 推出），拓扑为 triangle-strip。
+ *
+ * @param {GPUShaderModule} vertexModule - 顶点着色器模块。
+ * @param {GPUShaderModule} fragmentModule - 片元着色器模块。
+ * @returns {GPURenderPipeline}
+ */
+function _createRenderPipeline(vertexModule, fragmentModule) {
+  return _device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: vertexModule,
+      entryPoint: 'main',
+      buffers: [],
+    },
+    fragment: {
+      module: fragmentModule,
+      entryPoint: 'main',
+      targets: [
+        {
+          format: _format,
+          blend: {
+            color: {
+              srcFactor: 'one',
+              dstFactor: 'one-minus-src-alpha',
+              operation: 'add',
+            },
+            alpha: {
+              srcFactor: 'one',
+              dstFactor: 'one-minus-src-alpha',
+              operation: 'add',
+            },
+          },
+        },
+      ],
+    },
+    primitive: {
+      topology: 'triangle-strip',
+      stripIndexFormat: undefined,
+    },
+  });
+}
+
+/**
  * 初始化 WebGPU 设备、管线、缓冲区。
  *
- * 异步获取 GPUAdapter → GPUDevice，创建 compute + render pipeline，
- * 分配粒子缓冲区并写入初始数据。
+ * 本函数只负责"顺序与失败处理"，各步委托给 _acquireDevice()、
+ * _wireDeviceListeners()、_createUniformBuffers()、_createPipelines()，
+ * 再调用既有的 _createParticleBuffers() / _updateWorldSize() /
+ * _uploadFreshParticleData()。
  *
  * 无参：就绪时直接读取 canvas 当前尺寸计算 _screenW/_screenH/焦距——避免异步
  * 初始化期间发生 resize 后，用启动时的旧尺寸覆盖新尺寸的竞态。
@@ -1111,65 +1274,13 @@ async function _initGPUResources() {
     return;
   }
 
-  try {
-    // 注：Chromium 在 Windows 上会忽略 requestAdapter 的 powerPreference
-    // （crbug.com/369219127），GPU 由系统分配给进程，传该选项无效且打警告。
-    // 双显卡机型如需指定 GPU，请用户在 Windows「设置 → 系统 → 屏幕 → 显示卡」
-    // 中为 wallpaper32.exe / webwallpaper32.exe 指定高性能或节能 GPU。
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      _abortInit();
-      return;
-    }
-    const device = await adapter.requestDevice();
-    if (!device) {
-      _abortInit();
-      return;
-    }
-    _device = device;
-  } catch {
+  const device = await _acquireDevice();
+  if (!device) {
+    // 拿不到设备：不启动粒子层，也不安排重试（首帧就失败的机器重试必然复现）。
     _abortInit();
     return;
   }
-
-  _queue = _device.queue;
-  // 本次创建的设备实例：下面两道监听都以它为准（device 是 try 块内的局部量，
-  // 出了块就不可见，所以必须在这里用函数作用域的量捕获）。
-  const thisDevice = _device;
-
-  // 设备丢失（驱动重置 / 切换独显核显 / DWM 重置 / 页面抢占等）：先致停，
-  // 再安排一次有上限的重试——这类丢失通常是瞬态的，重新取设备即可恢复。
-  // 两道监听都以本次创建的 device 为准：重试成功后旧设备的迟到事件不得影响
-  // 新设备（否则一个迟到的校验错误会把刚恢复的设备再打掉）。
-  _device.lost.then((info) => {
-    if (_device !== thisDevice) {
-      return;
-    }
-    console.warn('[particles] WebGPU 设备丢失:', info.reason, info.message);
-    _shutdown();
-    // 翻转型故障限流：恢复后立刻又丢时，每轮成功都会清零 _initAttempts，重试会
-    // 以 RETRY_DELAY_MS 为周期无限重建设备（约 1800 次/小时）。窗口内丢失过频即
-    // 放弃，进入与"重试次数耗尽"相同的终态（雪花停住、CSS 背景仍在）。
-    if (_recordLossAndShouldStop(performance.now())) {
-      console.warn(
-        `[particles] ${LOSS_WINDOW_MS / 60000} 分钟内设备反复丢失，停止重试，回退到纯 CSS 背景`,
-      );
-      return;
-    }
-    _scheduleRetry();
-  });
-
-  // GPU 校验错误（submit/dispatch 等）不会抛 JS 异常，只走 uncapturederror
-  // 事件——原先的 try/catch 抓不到这类错误。此处监听并统一致停，
-  // 兑现"任何 GPU 异常停止循环"的行为约定，同时避免每帧重复报错刷屏。
-  // 校验错误是确定性的，重试必然复现，因此这里不做重试。
-  _device.addEventListener('uncapturederror', (ev) => {
-    if (_device !== thisDevice) {
-      return;
-    }
-    console.warn('[particles] 未捕获的 GPU 错误，粒子已停止:', ev.error);
-    _shutdown();
-  });
+  _wireDeviceListeners(device);
 
   try {
     // 异步等待期间可能发生过 resize，此处读取 canvas 的"当前"尺寸。
@@ -1189,59 +1300,8 @@ async function _initGPUResources() {
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
 
-    _computeUniformBuf = _device.createBuffer({
-      size: 28, // 7 个字段（cameraZ + u32 count）
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    _renderUniformBuf = _device.createBuffer({
-      size: 48, // 12 个 f32
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    const computeModule = _device.createShaderModule({ code: COMPUTE_SHADER });
-    const vertexModule = _device.createShaderModule({ code: VERTEX_SHADER });
-    const fragmentModule = _device.createShaderModule({
-      code: FRAGMENT_SHADER,
-    });
-
-    _computePipeline = _device.createComputePipeline({
-      layout: 'auto',
-      compute: { module: computeModule, entryPoint: 'main' },
-    });
-
-    _renderPipeline = _device.createRenderPipeline({
-      layout: 'auto',
-      vertex: {
-        module: vertexModule,
-        entryPoint: 'main',
-        buffers: [],
-      },
-      fragment: {
-        module: fragmentModule,
-        entryPoint: 'main',
-        targets: [
-          {
-            format: _format,
-            blend: {
-              color: {
-                srcFactor: 'one',
-                dstFactor: 'one-minus-src-alpha',
-                operation: 'add',
-              },
-              alpha: {
-                srcFactor: 'one',
-                dstFactor: 'one-minus-src-alpha',
-                operation: 'add',
-              },
-            },
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-strip',
-        stripIndexFormat: undefined,
-      },
-    });
+    _createUniformBuffers();
+    _createPipelines();
 
     _createParticleBuffers();
     // 先按当前 canvas 尺寸定好世界，再播种粒子：异步初始化期间若发生过
