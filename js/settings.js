@@ -65,7 +65,7 @@ window.wallpaperPropertyListener = {
       setSpeed(props.aSpeed.value);
     }
 
-    /** 壁纸显示模式：填充 / 等比缩放 / 平铺 */
+    /** 壁纸显示模式：填充 / 等比缩放 / 原始尺寸 */
     if (props.customcombo) {
       setDisplayMode(props.customcombo.value);
     }
