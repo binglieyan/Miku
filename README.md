@@ -137,9 +137,9 @@ pnpm format        # oxfmt 代码格式化
 
 ## 📄 许可
 
-本项目代码采用 [MIT 许可证](LICENSE) 开源。
+本项目的**源代码**采用 [MIT 许可证](LICENSE) 开源。
 
-背景原画（`images/bg.png`、`preview.jpg`）版权归 **千夜 QYS3** 所有，已获授权在此壁纸项目中使用，不在 MIT 许可范围内。请勿单独提取或二次分发这些图片。
+**第三方美术素材不在该许可范围内**：`images/bg.png` 与 `preview.jpg` 是原画师 **千夜 QYS3**（Pixiv ID 7210261）的作品，已获授权在本壁纸项目中使用；它们不属于 MIT 许可所定义的 Software，不得单独提取、二次分发或用于其它项目。这一范围说明写在 [LICENSE](LICENSE) 正文之后的「License scope」一节。
 
 ---
 
