@@ -27,7 +27,7 @@ function toCss(mode) {
  *
  * cover   — 等比填满容器，超出部分裁剪。
  * contain — 等比完整显示，留黑边。
- * auto    — 原始尺寸，不缩放；超出视口则居中裁切（#background 声明为 no-repeat，
+ * auto    — 原始尺寸，不缩放；超出视口则居中裁切（#background 为 no-repeat，
  *           见 index.html，因此不会平铺）。
  *
  * @param {string} mode - Wallpaper Engine combo 值（cover / contain / auto）。

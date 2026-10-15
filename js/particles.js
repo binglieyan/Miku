@@ -36,6 +36,14 @@ if (!canvas) {
   );
 }
 
+/* ——— 与着色器共享的常量 ————————————————————— */
+
+// 远平面距相机的距离（世界单位）：JS 的 MAX_DIST 与 WGSL 的远距渐隐起点共用同一
+// 个值，因此它必须定义在着色器模板之前——模板在模块求值时就要求值，写在下面的
+// 参数区会踩到 const 的 TDZ（未初始化即访问）。
+/** @type {number} */
+const FAR_PLANE_OFFSET = 1000;
+
 /* ————————————————————————————————————————————
  *  WGSL 着色器
  * ———————————————————————————————————————————— */
@@ -80,6 +88,31 @@ fn windXOffset(x: f32, y: f32, phase: f32) -> f32 {
 
 fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
   return sin(x * 0.0035 + y * 0.0035 + phase * 0.25) * 45.0 * gustPulse(phase);
+}
+
+// 风场位移：湍流 + 横向风 + 深度风，按"新旧相位之差"计算——差值形式避免每帧
+// 重复叠加绝对偏移造成无界漂移；再用 nearScale 做近处收敛（dist < 500 起衰减，
+// 下限 0.35），避免贴脸雪花摆动过剧。
+//
+// 返回四个分量而不是合并后的和：调用方保持各自的累加顺序，浮点结果与"在两侧
+// 各自展开"逐位相同。compute 与 vertex 共用这一个实现，两侧不可能再漂移。
+struct WindDelta {
+  swayX: f32,
+  swayY: f32,
+  windX: f32,
+  windZ: f32,
+}
+
+fn windDelta(p: Particle, cameraZ: f32, phase0: f32, phase1: f32) -> WindDelta {
+  let nearScale = clamp((cameraZ - p.posZ) / 500.0, 0.35, 1.0);
+  return WindDelta(
+    (swayX(phase1, p._p1) - swayX(phase0, p._p1)) * nearScale,
+    (swayY(phase1, p._p1) - swayY(phase0, p._p1)) * nearScale,
+    (windXOffset(p.posX, p.posY, phase1)
+     - windXOffset(p.posX, p.posY, phase0)) * nearScale,
+    (windZOffset(p.posX, p.posY, phase1)
+     - windZOffset(p.posX, p.posY, phase0)) * nearScale,
+  );
 }
 `;
 
@@ -177,23 +210,15 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let nextY = p.posY + p.velY * u.speedFactor;
   let nextZ = p.posZ + p.velZ * u.speedFactor;
 
-  // 近处收敛：靠近镜头的湍流/风场位移按深度衰减（dist < 500 起衰减，下限
-  // 0.35），避免贴脸雪花摆动过剧——与风场进入物理位置之前 nearScale 的语义
-  // 一致。compute / vertex 用同一表达式与同一 p.posZ，保证两侧轨迹一致。
-  let nearScale = clamp((u.cameraZ - p.posZ) / 500.0, 0.35, 1.0);
-
   // 湍流、横向风、深度风都以"位移差"形式进入模拟位置，避免每帧重复叠加
   // 一个绝对偏移值造成无界漂移。风场按当前物理位置采样，形成空间变化的气流。
-  let deltaSwayX = (swayX(phase1, p._p1) - swayX(phase0, p._p1)) * nearScale;
-  let deltaSwayY = (swayY(phase1, p._p1) - swayY(phase0, p._p1)) * nearScale;
-  let deltaWindX = (windXOffset(p.posX, p.posY, phase1)
-                  - windXOffset(p.posX, p.posY, phase0)) * nearScale;
-  let deltaWindZ = (windZOffset(p.posX, p.posY, phase1)
-                  - windZOffset(p.posX, p.posY, phase0)) * nearScale;
+  // 位移差与近处收敛系数都由 WGSL_COMMON 的 windDelta 提供——与顶点着色器共用
+  // 同一实现，两侧不会再出现"物理在动、渲染按另一套算"的静默漂移。
+  let d = windDelta(p, u.cameraZ, phase0, phase1);
 
-  p.posX = nextX + deltaSwayX + deltaWindX;
-  p.posY = nextY + deltaSwayY;
-  p.posZ = nextZ + deltaWindZ;
+  p.posX = nextX + d.swayX + d.windX;
+  p.posY = nextY + d.swayY;
+  p.posZ = nextZ + d.windZ;
   p._p0 = phase1;
 
   // 三轴统一使用模运算式环绕，缩放后落在新边界之外或一步跨越多个周期也有效。
@@ -272,17 +297,12 @@ fn main(
   // 这只是对下一小段物理运动的预测，不是独立的视觉位移。
   let phase0 = p._p0;
   let phase1 = wrapRange(phase0 + u.extrapPhase, 0.0, TIME_WRAP);
-  // 与 compute shader 相同的近处收敛系数（同一表达式、同一 p.posZ）。
-  let nearScale = clamp((u.cameraZ - p.posZ) / 500.0, 0.35, 1.0);
-  let deltaSwayX = (swayX(phase1, p._p1) - swayX(phase0, p._p1)) * nearScale;
-  let deltaSwayY = (swayY(phase1, p._p1) - swayY(phase0, p._p1)) * nearScale;
-  let deltaWindX = (windXOffset(p.posX, p.posY, phase1)
-                  - windXOffset(p.posX, p.posY, phase0)) * nearScale;
-  let deltaWindZ = (windZOffset(p.posX, p.posY, phase1)
-                  - windZOffset(p.posX, p.posY, phase0)) * nearScale;
-  var px = p.posX + p.velX * u.extrapFactor + deltaSwayX + deltaWindX;
-  var py = p.posY + p.velY * u.extrapFactor + deltaSwayY;
-  var pz = p.posZ + p.velZ * u.extrapFactor + deltaWindZ;
+  // 与 compute shader 共用同一个 windDelta（同一套位移差 + 同一 nearScale +
+  // 同一 p.posZ），两侧因此逐位一致，不存在"渲染走另一条轨迹"的可能。
+  let d = windDelta(p, u.cameraZ, phase0, phase1);
+  var px = p.posX + p.velX * u.extrapFactor + d.swayX + d.windX;
+  var py = p.posY + p.velY * u.extrapFactor + d.swayY;
+  var pz = p.posZ + p.velZ * u.extrapFactor + d.windZ;
 
   // 环绕之前的预测深度。可见性门控用预测深度，而不是缓冲区里尚未外推的
   // p.posZ：否则预测已越过 zMax（跑到镜头后）的粒子会先被环绕丢到远平面，
@@ -290,12 +310,9 @@ fn main(
   let predDist = u.cameraZ - pz;
 
   // 与 compute shader 完全一致的模运算式环绕，处理外推越界和新尺寸下的旧状态。
-  let rangeX = 2.0 * u.worldHalf;
-  let rangeY = 2.0 * u.yHalf;
-  let rangeZ = u.zMax - u.zMin;
-  px = px - rangeX * floor((px + u.worldHalf) / rangeX);
-  py = py - rangeY * floor((py + u.yHalf) / rangeY);
-  pz = pz - rangeZ * floor((pz - u.zMin) / rangeZ);
+  px = wrapRange(px, -u.worldHalf, u.worldHalf);
+  py = wrapRange(py, -u.yHalf, u.yHalf);
+  pz = wrapRange(pz, u.zMin, u.zMax);
 
   let dist = u.cameraZ - pz;
 
@@ -331,7 +348,10 @@ fn main(
     // 所以这里取到的始终是 MAX_DIST；万一将来常量被调坏，也只是把渐隐带压窄，
     // 不会退化成 edge0 > edge1 的未定义行为。
     let farFadeEnd = u.cameraZ - u.zMin;
-    let farFadeStart = min(u.cameraZ + 1000.0, farFadeEnd - MIN_FAR_FADE);
+    let farFadeStart = min(
+      u.cameraZ + f32(${FAR_PLANE_OFFSET}),
+      farFadeEnd - MIN_FAR_FADE,
+    );
     if (predDist > farFadeStart) {
       fade *= 1.0 - smoothstep(farFadeStart, farFadeEnd, predDist);
     }
@@ -508,6 +528,12 @@ const _extrapData = new Float32Array(2);
 /**
  * Render pass 描述符模板（colorAttachments[0].view 每帧替换）。
  *
+ * 复用契约：beginRenderPass() 在调用时**同步读取**描述符内容，所以之后改 .view
+ * 不影响已经开始的 pass——这正是"一个模板对象每帧改 view"能成立的原因。代价是
+ * **每开启一个 pass 之前都必须重新设置 view**：将来若在同一帧里编码多个 render
+ * pass（后处理、或把清屏与绘制拆开），漏设一次就会让该 pass 渲染到上一个 pass
+ * 的纹理上，而且不会报错。
+ *
  * @type {GPURenderPassDescriptor}
  */
 const _renderPassDescriptor = {
@@ -533,14 +559,21 @@ const [_colorAttachment] = _renderPassDescriptor.colorAttachments;
 /**
  * Queue submit 参数数组（预分配，避免每帧创建）。
  *
+ * 复用安全的前提是"写完立刻 submit"：submit() 在调用时同步读取数组内容，所以
+ * 覆盖 _submitArray[0] 之后紧接着提交是安全的；不要把数组留着、跨事件循环再去
+ * 填充并提交，那样读到的会是后写入的命令缓冲。
+ *
  * @type {Array<GPUCommandBuffer>}
  */
 const _submitArray = [null];
 
 /* ——— 参数 —————————————————————————————————— */
 
+/** @type {number} 默认粒子数：引擎未给值、或给了无效值时使用。 */
+const DEFAULT_COUNT = 500;
+
 /** @type {number} 当前活跃粒子数。 */
-let _count = 500;
+let _count = DEFAULT_COUNT;
 
 /** @type {number} 当前速度系数。 */
 let _speedFactor = 1;
@@ -561,7 +594,7 @@ let _focalLength;
 const FIXED_STEP = 1000 / 60;
 
 /** @type {number} 当前 workgroup 分发数 = ceil(count / 64)。 */
-let _workgroupCount = Math.ceil(500 / 64);
+let _workgroupCount = Math.ceil(DEFAULT_COUNT / 64);
 
 /* ——— 3D 世界常量（动态） —————————————————— */
 
@@ -580,8 +613,8 @@ let _zMax = 1001;
 /** @type {number} 相机 Z 坐标。 */
 const CAMERA_Z = 1000;
 
-/** @type {number} 最远可见距离（世界单位），相机前方 1000。 */
-const MAX_DIST = CAMERA_Z + 1000;
+/** @type {number} 最远可见距离（世界单位），相机前方 FAR_PLANE_OFFSET。 */
+const MAX_DIST = CAMERA_Z + FAR_PLANE_OFFSET;
 
 /** @type {number} 视场角（弧度），75°。 */
 const FOV = (75 * Math.PI) / 180;
@@ -801,7 +834,7 @@ function _generateParticleData(n) {
     const vx = vz * Math.sin(ay);
     vz = vz * Math.cos(ay);
 
-    // 初始位置：三条轴分别按盒子边界均匀采样（x/y 为 ±半宽，z 为 [下限, 上限)）。
+    // 初始位置：三条轴分别按盒子边界均匀采样（x/y 为 ±半宽，z 为 [下限, 上限)）
     // 不缓存"x 总宽"这类派生量——它必须跟着半宽同步更新，多一份状态就多一个
     // 静默错位的入口。
     const off = i * 8;
@@ -939,9 +972,10 @@ function _writeComputeUniforms() {
  * 将 render uniform 数据写入 GPU 缓冲区。
  *
  * 布局：[focalLength, cameraZ, screenW, screenH, particleRadius, pink, extrapFactor, extrapPhase, worldHalf, yHalf, zMin, zMax]
- * extrapFactor 与 extrapPhase 在这里写入**当前值**：属性回调可能发生在帧间，
- * 缓冲区任意时刻都应自洽。handleFrame 每帧会用最新值覆盖 offset 24 的这两个
- * f32。
+ * extrapFactor 与 extrapPhase 会被写两遍：这里写**当前值**，handleFrame
+ * 每帧再用最新值按 offset 24 覆盖（见 _extrapData）。这是刻意的双保险——属性
+ * 回调可能发生在帧间，全量写一次让缓冲区在任意时刻都自洽，而帧内那次才是提交
+ * 前的权威值。
  *
  * @returns {void}
  */
@@ -1012,8 +1046,8 @@ async function _initGPU() {
  * 异步获取 GPUAdapter → GPUDevice，创建 compute + render pipeline，
  * 分配粒子缓冲区并写入初始数据。
  *
- * 无参：就绪时直接读取 canvas 当前尺寸计算 _screenW/_screenH/焦距——避免异步初始化
- * 期间发生 resize 后，用启动时的旧尺寸覆盖新尺寸的竞态。
+ * 无参：就绪时直接读取 canvas 当前尺寸计算 _screenW/_screenH/焦距——避免异步
+ * 初始化期间发生 resize 后，用启动时的旧尺寸覆盖新尺寸的竞态。
  *
  * 任何失败路径（无 WebGPU 支持、adapter 获取失败、设备创建失败、
  * 上下文/管线/缓冲区创建异常、uncapturederror）均经 _shutdown() 释放设备
@@ -1430,7 +1464,7 @@ export function start() {
  *
  * 仅更新 uniform count 和 workgroup 分发数，不重建缓冲区。
  * 值会被 clamp 到 [0, MAX_COUNT] 并向下取整；输入为 null/undefined
- * 或非有限数值（NaN / Infinity）时回退为 500。
+ * 或非有限数值（NaN / Infinity）时回退为 DEFAULT_COUNT。
  * 设为 0 时停止帧循环（无 GPU 工作，避免 rAF 空转）并清空画布上的
  * 静止粒子，恢复为正数时自动重启循环（重置 _lastTime 与 _accum，
  * 避免一次性补帧）。
@@ -1442,12 +1476,12 @@ export function start() {
 export function setCount(n) {
   let v;
   if (n == null) {
-    v = 500;
+    v = DEFAULT_COUNT;
   } else {
     const x = Number(n);
     v = Number.isFinite(x)
       ? Math.max(0, Math.min(MAX_COUNT, Math.floor(x)))
-      : 500;
+      : DEFAULT_COUNT;
   }
 
   if (v !== _count) {
