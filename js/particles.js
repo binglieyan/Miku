@@ -667,11 +667,25 @@ let _retryTimer = null;
 /** @type {boolean} _initGPU 的重入保护。 */
 let _initializing = false;
 
+/**
+ * @type {number[]} 滑动窗口内的设备丢失时间戳（ms）。
+ *
+ * 用于给"设备恢复后立刻又丢"的翻转型故障设上限：那种情况下每轮成功都会把
+ * _initAttempts 清零，_scheduleRetry 的上限永远碰不到，重试会无限循环。
+ */
+const _lossStamps = [];
+
 /** @type {number} 单轮初始化允许的最大尝试次数（成功后清零，每轮重新计）。 */
 const MAX_INIT_ATTEMPTS = 3;
 
 /** @type {number} 设备丢失后的重试间隔（ms）。 */
 const RETRY_DELAY_MS = 2000;
+
+/** @type {number} 限流窗口长度（ms）：窗口内丢失次数超上限即放弃重试。 */
+const LOSS_WINDOW_MS = 10 * 60 * 1000;
+
+/** @type {number} 窗口内允许的设备丢失次数上限。 */
+const MAX_LOSSES_PER_WINDOW = 5;
 
 /* ————————————————————————————————————————————
  *  工具函数
@@ -728,6 +742,25 @@ function _shutdown() {
     cancelAnimationFrame(_rafId);
     _rafId = null;
   }
+}
+
+/**
+ * 记录一次设备丢失，判断窗口内是否已过频（应当放弃重试）。
+ *
+ * 与 _initAttempts 的分工：后者管"一轮初始化里连续失败几次就放弃"，本函数管
+ * "短时间内丢太多次就整体放弃"——两者的触发条件正交，互不替代。
+ *
+ * 只依赖传入的 now 与 _lossStamps，因此可以按时间线单独验证。
+ *
+ * @param {number} now - 当前时间戳（ms），取自 performance.now()（单调时钟）。
+ * @returns {boolean} true 表示窗口内丢失次数已超上限，应停止重试。
+ */
+function _recordLossAndShouldStop(now) {
+  while (_lossStamps.length > 0 && now - _lossStamps[0] > LOSS_WINDOW_MS) {
+    _lossStamps.shift();
+  }
+  _lossStamps.push(now);
+  return _lossStamps.length > MAX_LOSSES_PER_WINDOW;
 }
 
 /**
@@ -1114,6 +1147,15 @@ async function _initGPUResources() {
     }
     console.warn('[particles] WebGPU 设备丢失:', info.reason, info.message);
     _shutdown();
+    // 翻转型故障限流：恢复后立刻又丢时，每轮成功都会清零 _initAttempts，重试会
+    // 以 RETRY_DELAY_MS 为周期无限重建设备（约 1800 次/小时）。窗口内丢失过频即
+    // 放弃，进入与"重试次数耗尽"相同的终态（雪花停住、CSS 背景仍在）。
+    if (_recordLossAndShouldStop(performance.now())) {
+      console.warn(
+        `[particles] ${LOSS_WINDOW_MS / 60000} 分钟内设备反复丢失，停止重试，回退到纯 CSS 背景`,
+      );
+      return;
+    }
     _scheduleRetry();
   });
 
