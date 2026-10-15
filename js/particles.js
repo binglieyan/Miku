@@ -84,6 +84,48 @@ fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
 `;
 
 /**
+ * compute 与 vertex 共用的粒子结构（storage buffer 的元素类型）。
+ *
+ * 两个着色器读写的是同一对 storage buffer，结构必须逐字一致；这里只写一份，
+ * 由两个着色器插值共用。
+ *
+ * @constant {string}
+ */
+const WGSL_PARTICLE = /* wgsl */ `
+struct Particle {
+  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：粒子局部模拟时钟
+  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流幅度
+}
+`;
+
+/**
+ * vertex 与 fragment 共用的 render uniform 结构。
+ *
+ * 两个阶段同属一条 pipeline、共用同一个 binding，WGSL 要求两侧声明的类型完全
+ * 一致（否则 pipeline 创建失败），所以这里只写一份。字段顺序与 JS 侧
+ * _renderUniformData 的下标一一对应；片元着色器只读前 6 个（focalLength …
+ * pink），其余字段为保持两侧类型一致而保留。
+ *
+ * @constant {string}
+ */
+const WGSL_RENDER_UNIFORMS = /* wgsl */ `
+struct Uniforms {
+  focalLength:    f32,
+  cameraZ:        f32,
+  screenW:        f32,
+  screenH:        f32,
+  particleRadius: f32,
+  pink:           f32,
+  extrapFactor:   f32,   // speedFactor × (accum / FIXED_STEP)，0 时不外推
+  extrapPhase:    f32,   // (accum / FIXED_STEP) / 60：分数步对应的相位增量
+  worldHalf:      f32,   // 动态世界 x 半宽（由 JS 根据视锥计算）
+  yHalf:          f32,   // 盒子世界：y 半高
+  zMin:           f32,   // 盒子世界：z 下限
+  zMax:           f32,   // 盒子世界：z 上限
+}
+`;
+
+/**
  * 物理步进 compute shader（WGSL）。
  *
  * 每个线程处理一个粒子：基础运动 + 物理湍流/风场位移 + 三轴边界环绕。
@@ -94,10 +136,7 @@ fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
  * @constant {string}
  */
 const COMPUTE_SHADER = /* wgsl */ `
-struct Particle {
-  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：粒子局部模拟时钟
-  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流幅度
-}
+${WGSL_PARTICLE}
 
 struct Uniforms {
   speedFactor: f32,
@@ -189,26 +228,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
  * @constant {string}
  */
 const VERTEX_SHADER = /* wgsl */ `
-struct Particle {
-  posX: f32, posY: f32, posZ: f32, _p0: f32,  // _p0：粒子局部模拟时钟
-  velX: f32, velY: f32, velZ: f32, _p1: f32,  // _p1：湍流幅度
-}
+${WGSL_PARTICLE}
 
-// 注意：此结构必须与片元着色器中的 Uniforms 完全一致（两者共用同一 binding）。
-struct Uniforms {
-  focalLength:    f32,
-  cameraZ:        f32,
-  screenW:        f32,
-  screenH:        f32,
-  particleRadius: f32,
-  pink:           f32,
-  extrapFactor:   f32,   // speedFactor × (accum / FIXED_STEP)，0 时不外推
-  extrapPhase:    f32,   // (accum / FIXED_STEP) / 60：分数步对应的相位增量
-  worldHalf:      f32,   // 动态世界 x 半宽（由 JS 根据视锥计算）
-  yHalf:          f32,   // 盒子世界：y 半高
-  zMin:           f32,   // 盒子世界：z 下限
-  zMax:           f32,   // 盒子世界：z 上限
-}
+${WGSL_RENDER_UNIFORMS}
 
 // 近距处理常量：屏幕半径封顶（物理像素）与近距渐隐距离（世界单位）
 const MAX_SR: f32 = 48.0;
@@ -363,20 +385,7 @@ fn main(
  * @constant {string}
  */
 const FRAGMENT_SHADER = /* wgsl */ `
-struct Uniforms {
-  focalLength:    f32,
-  cameraZ:        f32,
-  screenW:        f32,
-  screenH:        f32,
-  particleRadius: f32,
-  pink:           f32,
-  extrapFactor:   f32,  // 顶点着色器专用，此处不读取
-  extrapPhase:    f32,  // 顶点着色器专用，此处不读取
-  worldHalf:      f32,  // 顶点着色器专用，此处不读取
-  yHalf:          f32,  // 顶点着色器专用，此处不读取
-  zMin:           f32,  // 顶点着色器专用，此处不读取
-  zMax:           f32,  // 顶点着色器专用，此处不读取
-}
+${WGSL_RENDER_UNIFORMS}
 
 @group(0) @binding(1) var<uniform> u: Uniforms;
 
