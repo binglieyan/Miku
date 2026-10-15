@@ -9,6 +9,6 @@
     "types": ["@webgpu/types"],
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
-  "include": ["js/**/*.js", "index.html"],
+  "include": ["js/**/*.js", "types/**/*.d.ts", "index.html"],
   "exclude": ["node_modules", "dist"]
 }

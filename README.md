@@ -54,6 +54,8 @@ Miku/
 │   ├── settings.js      # Wallpaper Engine 属性监听桥 — 引擎 ↔ JS 模块的桥梁
 │   ├── particles.js     # WebGPU 粒子系统 — compute/render pipeline、缓冲区管理、帧循环
 │   └── background.js    # 背景显示模式 — CSS background-size 切换
+├── types/
+│   └── wallpaper-engine.d.ts   # 引擎注入的全局接口声明（供 IDE 类型检查）
 └── CLAUDE.md            # 项目开发文档（面向 AI 辅助开发）
 ```
 
