@@ -559,9 +559,6 @@ let _workgroupCount = Math.ceil(500 / 64);
 /** @type {number} 世界 x 半宽（世界范围为 [-_worldHalf, _worldHalf]）。 */
 let _worldHalf = 2000; // 初始值，稍后会被 _updateWorldSize 覆盖
 
-/** @type {number} 世界 x 总宽。 */
-let _worldSize = 4000;
-
 /** @type {number} 世界 y 半高（盒子世界：远 fade 终点视锥半高 + 余量）。 */
 let _yHalf = 2000;
 
@@ -741,7 +738,6 @@ function _updateWorldSize() {
   const newHalf = Math.ceil(Math.max(halfW, halfH) * 1.1);
   // 下限 2000：极窄屏（竖屏）下视锥变小，仍保证世界体积不至于过小
   _worldHalf = Math.max(newHalf, 2000);
-  _worldSize = _worldHalf * 2;
 
   // 盒子世界：y/z 不再跟随 x 走满整个世界。
   // farFadeEnd = 远距渐隐终点。保留 115 世界单位的屏外缓冲，确保边界环绕
@@ -796,10 +792,13 @@ function _generateParticleData(n) {
     const vx = vz * Math.sin(ay);
     vz = vz * Math.cos(ay);
 
+    // 初始位置：三条轴分别按盒子边界均匀采样（x/y 为 ±半宽，z 为 [下限, 上限)）。
+    // 不缓存"x 总宽"这类派生量——它必须跟着半宽同步更新，多一份状态就多一个
+    // 静默错位的入口。
     const off = i * 8;
-    data[off] = Math.random() * _worldSize - _worldHalf;
-    data[off + 1] = Math.random() * (_yHalf * 2) - _yHalf;
-    data[off + 2] = _zMin + Math.random() * (_zMax - _zMin);
+    data[off] = randomRange(-_worldHalf, _worldHalf);
+    data[off + 1] = randomRange(-_yHalf, _yHalf);
+    data[off + 2] = randomRange(_zMin, _zMax);
     data[off + 3] = Math.random() * Math.PI * 2;
     data[off + 4] = vx;
     data[off + 5] = vy;
