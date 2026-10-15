@@ -25,7 +25,9 @@
  * ———————————————————————————————————————————— */
 
 /** @type {?HTMLCanvasElement} */
-const canvas = document.getElementById('canvas');
+const canvas = /** @type {?HTMLCanvasElement} */ (
+  document.getElementById('canvas')
+);
 
 // 缺少 canvas 时没有可渲染的目标，但模块必须能**成功求值**：粒子模块抛异常会
 // 连带打死入口 settings.js，属性桥（含背景显示模式）会一起失效。这里只报错，
@@ -142,8 +144,8 @@ struct Particle {
  *
  * 两个阶段同属一条 pipeline、共用同一个 binding，WGSL 要求两侧声明的类型完全
  * 一致（否则 pipeline 创建失败），所以这里只写一份。字段顺序与 JS 侧
- * _renderUniformData 的下标一一对应；片元着色器只读前 6 个（focalLength …
- * pink），其余字段为保持两侧类型一致而保留。
+ * _renderUniformData 的下标一一对应；片元着色器实际只读 pink（下标 5），其余
+ * 字段仅供顶点着色器使用，保留它们是为了两侧类型一致。
  *
  * @constant {string}
  */
@@ -180,7 +182,7 @@ ${WGSL_PARTICLE}
 struct Uniforms {
   speedFactor: f32,
   worldHalf:   f32,   // x 半宽
-  yHalf:       f32,   // 盒子世界：y 半高（小于 x）
+  yHalf:       f32,   // 盒子世界：y 半高（横屏下小于 x，竖屏/方形下更大）
   zMin:        f32,   // 盒子世界：z 下限（可见深度带远端）
   zMax:        f32,   // 盒子世界：z 上限（相机后 1 单位环绕落点）
   cameraZ:     f32,   // 相机 Z（近处收敛系数需要每颗粒子的深度）
@@ -193,9 +195,9 @@ struct Uniforms {
 
 ${WGSL_COMMON}
 
-// 每个固定物理步（FIXED_STEP = 1/60 秒）推进的相位量：1/60 相位 = 1 秒真实
-// 时间。风场与阵风的时间尺度因此与 aSpeed 滑杆（speedFactor）解耦——与把
-// 风场移入物理位置之前用真实秒数当相位的行为一致。
+// 每个固定物理步（FIXED_STEP = 1/PHYSICS_HZ 秒）推进 1/PHYSICS_HZ 相位，两者
+// 同值相消 → 1 相位 = 1 秒真实时间。风场与阵风的时间尺度因此与 aSpeed 滑杆
+// （speedFactor）解耦——与把风场移入物理位置之前用真实秒数当相位的行为一致。
 const PHASE_PER_STEP: f32 = 1.0 / f32(${PHYSICS_HZ});
 
 @compute @workgroup_size(64)
@@ -382,7 +384,8 @@ fn main(
   var sr = min(rawSr, MAX_SR);
 
   // 完全不可见（镜头后 / 渐隐完成，fade = 0）→ 半径归零成零面积四边形，
-  // 不产生任何片元——等效于原 sr < 0.5 剔除，且粒子仍在物理缓冲中继续模拟。
+  // 不产生任何片元。判据是 fade 而不是屏幕半径：粒子仍在物理缓冲中继续模拟，
+  // 下一帧 fade 恢复时无需重新播种。
   if (fade <= 0.0) { sr = 0.0; }
 
   // 投影系数：安全除法（防止 dist 过小时除零）
@@ -402,8 +405,9 @@ fn main(
 `;
 
 /**
- * 片元着色器（WGSL）— 径向渐变圆（smoothstep 衰减 × 近距渐隐 fade），
- * 预乘 alpha 输出（匹配 canvas 的 premultiplied alphaMode）。
+ * 片元着色器（WGSL）— 径向渐变圆（smoothstep 衰减 × 顶点着色器算出的可见性
+ * fade：近/远渐隐与视锥渐隐的乘积），预乘 alpha 输出（匹配 canvas 的
+ * premultiplied alphaMode）。
  *
  * Uniforms 结构与顶点着色器完全一致（同一 binding 共用）；
  * 本着色器只读取 pink，其他字段仅供顶点着色器使用。
@@ -426,7 +430,7 @@ fn main(
   @location(1) fade: f32,
 ) -> @location(0) vec4<f32> {
   let d = length(uv - 0.5) * 2.0;  // 0 在中心，1 在内接圆边缘
-  let alpha = computeAlpha(d) * fade;  // fade：近距渐隐，来自顶点着色器
+  let alpha = computeAlpha(d) * fade;  // fade：聚合可见性，来自顶点着色器
 
   let white = vec3(1.0, 1.0, 1.0);
   let pink  = vec3(0.96078, 0.70196, 0.73725);  // 245,179,188 #f5b3bc
@@ -712,8 +716,9 @@ function randomRange(min, max) {
  * 都能真正终止循环——修复了原先"cancel 之后 frameLoop 又 request"
  * 导致循环无法停下、以空设备状态无限空转的问题。
  *
- * 同时释放对 GPU 资源的引用：绑定组 / 管线 / 缓冲区各自都持有 device 引用，
- * 只置空 _device 会让整张失效设备图保持可达。重试时 _initGPU 会重建它们。
+ * 同时释放对 GPU 资源的引用：绑定组 / 管线 / 缓冲区 / 描述符里缓存的 view /
+ * 上一次提交的命令缓冲各自都持有 device 引用，只置空 _device 会让整张失效设备图
+ * 保持可达。重试时 _initGPU 会重建它们。
  *
  * @returns {void}
  */
@@ -733,6 +738,10 @@ function _shutdown() {
   _computeBindGroups[1] = null;
   _renderBindGroups[0] = null;
   _renderBindGroups[1] = null;
+  // 描述符里缓存的 view 与上一次提交的命令缓冲同样是 device 引用，一并放手；
+  // 下一帧/下次初始化会重新写入它们。
+  _colorAttachment.view = null;
+  _submitArray[0] = null;
   // 有意不在这里清空画布：设备丢失后 GPU 提交会被丢弃（什么也提交不出去），
   // 而非 GPU 的清空手段（隐藏 canvas / 重置后备缓冲）会把"设备丢失到重试成功
   // 之间的约 2 秒"从"雪花静止"变成"雪花消失又回来"，对瞬态丢失反而更突兀；
@@ -829,10 +838,11 @@ function _updateWorldSize() {
     CAMERA_Z + _worldHalf,
   );
   // 不变量：farFadeEnd > MAX_DIST，否则着色器里的远距渐隐会变成 edge0 > edge1。
-  // 现行参数下恒成立——_worldHalf 有 2000 硬下限、又乘了 1.1 余量，把上式
-  // 化简后横屏约为 2200 − 150/aspect、竖屏不小于 2457，故任意宽高比下
-  // farFadeEnd ≥ ≈2073，比 MAX_DIST = 2000 至少宽 73 世界单位。
-  // 着色器端另有 MIN_FAR_FADE 兜底，常量被调坏时也不会出现未定义行为。
+  // 现行参数下恒成立——_worldHalf 有 2000 硬下限、又乘了 1.1 余量：宽高比 ≳ 1.19
+  // 时化简为约 2200 − 150/aspect，更窄时由 2000 下限接管（≈ 2457/aspect）。
+  // 故任意宽高比下 farFadeEnd ≥ ≈2073（极小值恰在交界处），比 MAX_DIST = 2000
+  // 至少宽 73 世界单位。着色器端另有 MIN_FAR_FADE 兜底，常量被调坏时也不会出现
+  // 未定义行为。
   // y 半高：远 fade 终点处视锥半高 × 1.1 余量，保证 y 环绕始终在屏外
   _yHalf = Math.ceil(Math.tan(FOV / 2) * farFadeEnd * 1.1);
   // z 范围：可见深度带 [cameraZ - farFadeEnd, cameraZ] + 相机后 1 单位环绕落点
@@ -1334,7 +1344,7 @@ async function _initGPUResources() {
  * 单帧处理：固定步长物理更新 + 渲染。
  *
  * 1. 计算 elapsed → 累加到 _accum
- * 2. 消耗 floor(_accum / FIXED_STEP) 次 compute pass（ping-pong）
+ * 2. 按 floor(_accum / FIXED_STEP) 决定 dispatch 次数（同一 pass 内 ping-pong）
  * 3. 写入外推因子 → render pass（instanced draw）
  * 4. submit
  *
@@ -1392,7 +1402,7 @@ function handleFrame(timestamp) {
     }
 
     // extrapFactor：基础速度的分数步外推；
-    // extrapPhase：同一分数步对应的风场相位增量（整步为 1/60 相位 = 1 秒）。
+    // extrapPhase：同一分数步对应的风场相位增量（整步 = 1/PHYSICS_HZ 相位）。
     _extrapData[0] = _speedFactor * (_accum / FIXED_STEP);
     _extrapData[1] = _accum / FIXED_STEP / PHYSICS_HZ;
     _queue.writeBuffer(_renderUniformBuf, 24, _extrapData);

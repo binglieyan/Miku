@@ -8,7 +8,8 @@
  * 引擎在属性变更时调用 applyUserProperties，传入变更的属性集合。
  * 模块职责：纯转发，不做业务逻辑。
  *
- * 属性列表：
+ * 属性列表（本模块只处理这 4 项；project.json 里的 schemecolor 由引擎 UI 使用，
+ * 不经 JS）：
  *   aNumber      — 雪花数量（slider, 0–1000, 默认 500）
  *   aSpeed       — 降落速度（slider, 500–3500, 默认 2000, 越大越慢）
  *   custompink   — 使用粉色粒子（bool, 默认 false）
@@ -23,10 +24,16 @@ import { start, setCount, setSpeed, setPink } from './particles.js';
 /* ——— Wallpaper Engine 属性监听接口 ————————— */
 
 /**
+ * Wallpaper Engine 传入的属性集合：key 为属性名，value 形如 {value: ...}。
+ *
+ * @typedef {Record<string, {value: *}>} WPProperties
+ */
+
+/**
  * Wallpaper Engine 属性监听器类型定义。
  *
  * @typedef {Object} WPPropertyListener
- * @property {function(Object<string, {value: *}>): void} applyUserProperties - 属性变更回调。
+ * @property {(props: WPProperties) => void} applyUserProperties - 属性回调。
  */
 
 /**
@@ -45,7 +52,7 @@ window.wallpaperPropertyListener = {
   /**
    * 属性变更回调（由 Wallpaper Engine 调用，IDE 不可见）。
    *
-   * @param {Object<string, {value: *}>} props - 变更的属性集合，key 为属性名，value 为 {value: ...}。
+   * @param {WPProperties} props - 变更的属性集合。
    * @returns {void}
    */
   applyUserProperties(props) {
@@ -79,5 +86,7 @@ window.wallpaperPropertyListener = {
 
 /* ——— 启动 —————————————————————————————————— */
 
-/** 壁纸加载时立即启动粒子动画。 */
+// 壁纸加载时申请启动。此刻设备尚未就绪（_initGPU 仍在等 requestAdapter），
+// start() 是空操作；真正的启动发生在 particles.js 的初始化成功路径（那里也调
+// start()，幂等），本行只表达"加载即申请启动"的意图。
 start();
