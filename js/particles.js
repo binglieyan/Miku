@@ -540,10 +540,10 @@ let _speedFactor = 1;
 let _pink = false;
 
 /** @type {number} 画布宽度（物理像素）。 */
-let W;
+let _screenW;
 
 /** @type {number} 画布高度（物理像素）。 */
-let H;
+let _screenH;
 
 /** @type {number} 投影焦距。 */
 let _focalLength;
@@ -556,20 +556,20 @@ let _workgroupCount = Math.ceil(500 / 64);
 
 /* ——— 3D 世界常量（动态） —————————————————— */
 
-/** @type {number} 世界 x 半宽（世界范围为 [-WORLD_HALF, WORLD_HALF]）。 */
-let WORLD_HALF = 2000; // 初始值，稍后会被 _updateWorldSize 覆盖
+/** @type {number} 世界 x 半宽（世界范围为 [-_worldHalf, _worldHalf]）。 */
+let _worldHalf = 2000; // 初始值，稍后会被 _updateWorldSize 覆盖
 
 /** @type {number} 世界 x 总宽。 */
-let WORLD_SIZE = 4000;
+let _worldSize = 4000;
 
 /** @type {number} 世界 y 半高（盒子世界：远 fade 终点视锥半高 + 余量）。 */
-let Y_HALF = 2000;
+let _yHalf = 2000;
 
 /** @type {number} 世界 z 下限（盒子世界：可见深度带远端环绕平面）。 */
-let Z_MIN = -2000;
+let _zMin = -2000;
 
 /** @type {number} 世界 z 上限（盒子世界：相机后 1 单位环绕落点）。 */
-let Z_MAX = 1001;
+let _zMax = 1001;
 
 /** @type {number} 相机 Z 坐标。 */
 const CAMERA_Z = 1000;
@@ -737,30 +737,30 @@ function _abortInit() {
  */
 function _updateWorldSize() {
   const halfH = Math.tan(FOV / 2) * MAX_DIST;
-  const halfW = halfH * (W / H);
+  const halfW = halfH * (_screenW / _screenH);
   const newHalf = Math.ceil(Math.max(halfW, halfH) * 1.1);
   // 下限 2000：极窄屏（竖屏）下视锥变小，仍保证世界体积不至于过小
-  WORLD_HALF = Math.max(newHalf, 2000);
-  WORLD_SIZE = WORLD_HALF * 2;
+  _worldHalf = Math.max(newHalf, 2000);
+  _worldSize = _worldHalf * 2;
 
   // 盒子世界：y/z 不再跟随 x 走满整个世界。
   // farFadeEnd = 远距渐隐终点。保留 115 世界单位的屏外缓冲，确保边界环绕
   // 与 billboard 的边缘渐隐带均发生在可见视锥之外，减少边缘闪现。
   const EDGE_MARGIN = 115;
   const farFadeEnd = Math.min(
-    ((WORLD_HALF - EDGE_MARGIN) * 2 * _focalLength) / W,
-    CAMERA_Z + WORLD_HALF,
+    ((_worldHalf - EDGE_MARGIN) * 2 * _focalLength) / _screenW,
+    CAMERA_Z + _worldHalf,
   );
   // 不变量：farFadeEnd > MAX_DIST，否则着色器里的远距渐隐会变成 edge0 > edge1。
-  // 现行参数下恒成立——WORLD_HALF 有 2000 硬下限、又乘了 1.1 余量，把上式
+  // 现行参数下恒成立——_worldHalf 有 2000 硬下限、又乘了 1.1 余量，把上式
   // 化简后横屏约为 2200 − 150/aspect、竖屏不小于 2457，故任意宽高比下
   // farFadeEnd ≥ ≈2073，比 MAX_DIST = 2000 至少宽 73 世界单位。
   // 着色器端另有 MIN_FAR_FADE 兜底，常量被调坏时也不会出现未定义行为。
   // y 半高：远 fade 终点处视锥半高 × 1.1 余量，保证 y 环绕始终在屏外
-  Y_HALF = Math.ceil(Math.tan(FOV / 2) * farFadeEnd * 1.1);
+  _yHalf = Math.ceil(Math.tan(FOV / 2) * farFadeEnd * 1.1);
   // z 范围：可见深度带 [cameraZ - farFadeEnd, cameraZ] + 相机后 1 单位环绕落点
-  Z_MIN = CAMERA_Z - farFadeEnd;
-  Z_MAX = CAMERA_Z + 1;
+  _zMin = CAMERA_Z - farFadeEnd;
+  _zMax = CAMERA_Z + 1;
   // 重新写入 uniforms（如果设备已就绪）
   _writeComputeUniforms();
   _writeRenderUniforms();
@@ -772,8 +772,8 @@ function _updateWorldSize() {
  * 每个粒子 8 个 f32：
  *   [posX, posY, posZ, _p0, velX, velY, velZ, _p1]
  *
- * 初始位置在世界盒子内均匀随机分布（x ∈ ±WORLD_HALF，y ∈ ±Y_HALF，
- * z ∈ [Z_MIN, Z_MAX]），
+ * 初始位置在世界盒子内均匀随机分布（x ∈ ±_worldHalf，y ∈ ±_yHalf，
+ * z ∈ [_zMin, _zMax]），
  * 初始速度以 baseVy 为基础做锥形扩散（模拟雪花飘落）。
  * _p0 / _p1 分别为粒子局部模拟时钟的初始相位与湍流幅度（个体差异）。
  *
@@ -797,9 +797,9 @@ function _generateParticleData(n) {
     vz = vz * Math.cos(ay);
 
     const off = i * 8;
-    data[off] = Math.random() * WORLD_SIZE - WORLD_HALF;
-    data[off + 1] = Math.random() * (Y_HALF * 2) - Y_HALF;
-    data[off + 2] = Z_MIN + Math.random() * (Z_MAX - Z_MIN);
+    data[off] = Math.random() * _worldSize - _worldHalf;
+    data[off + 1] = Math.random() * (_yHalf * 2) - _yHalf;
+    data[off + 2] = _zMin + Math.random() * (_zMax - _zMin);
     data[off + 3] = Math.random() * Math.PI * 2;
     data[off + 4] = vx;
     data[off + 5] = vy;
@@ -918,10 +918,10 @@ function _writeComputeUniforms() {
     return;
   }
   _computeUniformData[0] = _speedFactor;
-  _computeUniformData[1] = WORLD_HALF;
-  _computeUniformData[2] = Y_HALF;
-  _computeUniformData[3] = Z_MIN;
-  _computeUniformData[4] = Z_MAX;
+  _computeUniformData[1] = _worldHalf;
+  _computeUniformData[2] = _yHalf;
+  _computeUniformData[3] = _zMin;
+  _computeUniformData[4] = _zMax;
   _computeUniformData[5] = CAMERA_Z;
   _computeUniformU32[6] = _count;
   _queue.writeBuffer(_computeUniformBuf, 0, _computeUniformData);
@@ -943,17 +943,17 @@ function _writeRenderUniforms() {
   }
   _renderUniformData[0] = _focalLength;
   _renderUniformData[1] = CAMERA_Z;
-  _renderUniformData[2] = W;
-  _renderUniformData[3] = H;
+  _renderUniformData[2] = _screenW;
+  _renderUniformData[3] = _screenH;
   _renderUniformData[4] = PARTICLE_RADIUS;
   _renderUniformData[5] = _pink ? 1.0 : 0.0;
   // extrapFactor / extrapPhase：写入当前值（handleFrame 每帧刷新这两个字段）
   _renderUniformData[6] = _speedFactor * (_accum / FIXED_STEP);
   _renderUniformData[7] = _accum / FIXED_STEP / 60;
-  _renderUniformData[8] = WORLD_HALF;
-  _renderUniformData[9] = Y_HALF;
-  _renderUniformData[10] = Z_MIN;
-  _renderUniformData[11] = Z_MAX;
+  _renderUniformData[8] = _worldHalf;
+  _renderUniformData[9] = _yHalf;
+  _renderUniformData[10] = _zMin;
+  _renderUniformData[11] = _zMax;
   _queue.writeBuffer(_renderUniformBuf, 0, _renderUniformData);
 }
 
@@ -1004,7 +1004,7 @@ async function _initGPU() {
  * 异步获取 GPUAdapter → GPUDevice，创建 compute + render pipeline，
  * 分配粒子缓冲区并写入初始数据。
  *
- * 无参：就绪时直接读取 canvas 当前尺寸计算 W/H/焦距——避免异步初始化
+ * 无参：就绪时直接读取 canvas 当前尺寸计算 _screenW/_screenH/焦距——避免异步初始化
  * 期间发生 resize 后，用启动时的旧尺寸覆盖新尺寸的竞态。
  *
  * 任何失败路径（无 WebGPU 支持、adapter 获取失败、设备创建失败、
@@ -1079,9 +1079,9 @@ async function _initGPUResources() {
 
   try {
     // 异步等待期间可能发生过 resize，此处读取 canvas 的"当前"尺寸。
-    W = canvas.width;
-    H = canvas.height;
-    _focalLength = H / (2 * Math.tan(FOV / 2));
+    _screenW = canvas.width;
+    _screenH = canvas.height;
+    _focalLength = _screenH / (2 * Math.tan(FOV / 2));
 
     _context = canvas.getContext('webgpu');
     _guard(_context, '获取 webgpu 上下文失败');
@@ -1334,11 +1334,11 @@ function _applyCanvasSize() {
     return;
   }
   const dpr = window.devicePixelRatio || 1;
-  W = Math.max(1, Math.floor(window.innerWidth * dpr));
-  H = Math.max(1, Math.floor(window.innerHeight * dpr));
-  canvas.width = W;
-  canvas.height = H;
-  _focalLength = H / (2 * Math.tan(FOV / 2));
+  _screenW = Math.max(1, Math.floor(window.innerWidth * dpr));
+  _screenH = Math.max(1, Math.floor(window.innerHeight * dpr));
+  canvas.width = _screenW;
+  canvas.height = _screenH;
+  _focalLength = _screenH / (2 * Math.tan(FOV / 2));
   _updateWorldSize();
 }
 
