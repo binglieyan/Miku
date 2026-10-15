@@ -40,7 +40,7 @@
 						"value" : "contain"
 					},
 					{
-						"label" : "平铺",
+						"label" : "原始尺寸",
 						"value" : "auto"
 					}
 				],

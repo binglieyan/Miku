@@ -31,12 +31,57 @@ const canvas = document.getElementById('canvas');
 // 连带打死入口 settings.js，属性桥（含背景显示模式）会一起失效。这里只报错，
 // 各使用点再各自早退——属性桥因此照常工作，只是没有雪花。
 if (!canvas) {
-  console.error('[particles] 未找到 #canvas，粒子层已禁用（背景层与属性桥不受影响）');
+  console.error(
+    '[particles] 未找到 #canvas，粒子层已禁用（背景层与属性桥不受影响）',
+  );
 }
 
 /* ————————————————————————————————————————————
  *  WGSL 着色器
  * ———————————————————————————————————————————— */
+
+/**
+ * compute 与 vertex 共用的 WGSL 片段：时间折回常量与风场/湍流函数。
+ *
+ * "物理与渲染走同一条轨迹"是整套设计的地基，两侧必须逐字一致——所以这里只
+ * 写一份，由两个着色器插值共用。改这里即同时改变物理与渲染，不会出现只改了
+ * 一侧、粒子被静默画到轨迹之外的情况。
+ *
+ * @constant {string}
+ */
+const WGSL_COMMON = /* wgsl */ `
+// 把任意距离的坐标折回 [minValue, maxValue)，而不是只修正一次。
+// 这同时覆盖窗口缩放、较大风场位移以及单帧跨越多个世界周期的情况。
+fn wrapRange(value: f32, minValue: f32, maxValue: f32) -> f32 {
+  let range = maxValue - minValue;
+  return value - range * floor((value - minValue) / range);
+}
+
+const TIME_WRAP: f32 = 628.3185307179587; // 200π，所有时间频率的共同周期
+
+fn swayX(phase: f32, amplitude: f32) -> f32 {
+  return (sin(phase * 2.0) * 26.0 + sin(phase) * 16.0) * amplitude;
+}
+
+fn swayY(phase: f32, amplitude: f32) -> f32 {
+  return cos(phase * 2.2) * 13.0 * amplitude;
+}
+
+fn gustPulse(phase: f32) -> f32 {
+  return 0.55 + 0.45 * sin(phase * 0.18 + 2.0);
+}
+
+fn windXOffset(x: f32, y: f32, phase: f32) -> f32 {
+  let wind = sin(x * 0.006 + phase * 0.8 + 1.3) * 16.0
+           + sin(y * 0.005 - phase * 0.35 + 0.7) * 20.0
+           + sin((x + y) * 0.0025 - phase * 0.12) * 22.0;
+  return wind * gustPulse(phase);
+}
+
+fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
+  return sin(x * 0.0035 + y * 0.0035 + phase * 0.25) * 45.0 * gustPulse(phase);
+}
+`;
 
 /**
  * 物理步进 compute shader（WGSL）。
@@ -68,42 +113,12 @@ struct Uniforms {
 @group(0) @binding(1) var<storage, read_write>  dst: array<Particle>;
 @group(0) @binding(2) var<uniform>              u:   Uniforms;
 
-// 把任意距离的坐标折回 [minValue, maxValue)，而不是只修正一次。
-// 这同时覆盖窗口缩放、较大风场位移以及单帧跨越多个世界周期的情况。
-fn wrapRange(value: f32, minValue: f32, maxValue: f32) -> f32 {
-  let range = maxValue - minValue;
-  return value - range * floor((value - minValue) / range);
-}
-
-const TIME_WRAP: f32 = 628.3185307179587; // 200π，所有时间频率的共同周期
+${WGSL_COMMON}
 
 // 每个固定物理步（FIXED_STEP = 1/60 秒）推进的相位量：1/60 相位 = 1 秒真实
 // 时间。风场与阵风的时间尺度因此与 aSpeed 滑杆（speedFactor）解耦——与把
 // 风场移入物理位置之前用真实秒数当相位的行为一致。
 const PHASE_PER_STEP: f32 = 1.0 / 60.0;
-
-fn swayX(phase: f32, amplitude: f32) -> f32 {
-  return (sin(phase * 2.0) * 26.0 + sin(phase) * 16.0) * amplitude;
-}
-
-fn swayY(phase: f32, amplitude: f32) -> f32 {
-  return cos(phase * 2.2) * 13.0 * amplitude;
-}
-
-fn gustPulse(phase: f32) -> f32 {
-  return 0.55 + 0.45 * sin(phase * 0.18 + 2.0);
-}
-
-fn windXOffset(x: f32, y: f32, phase: f32) -> f32 {
-  let wind = sin(x * 0.006 + phase * 0.8 + 1.3) * 16.0
-           + sin(y * 0.005 - phase * 0.35 + 0.7) * 20.0
-           + sin((x + y) * 0.0025 - phase * 0.12) * 22.0;
-  return wind * gustPulse(phase);
-}
-
-fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
-  return sin(x * 0.0035 + y * 0.0035 + phase * 0.25) * 45.0 * gustPulse(phase);
-}
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -198,38 +213,11 @@ struct Uniforms {
 // 近距处理常量：屏幕半径封顶（物理像素）与近距渐隐距离（世界单位）
 const MAX_SR: f32 = 48.0;
 const NEAR_DIST: f32 = 35.0;
-const TIME_WRAP: f32 = 628.3185307179587; // 与 compute shader 相同的 200π 周期
 
 // 远距渐隐带的最小宽度（世界单位）：保证 smoothstep 的 edge0 < edge1 恒成立。
 const MIN_FAR_FADE: f32 = 32.0;
 
-fn wrapRange(value: f32, minValue: f32, maxValue: f32) -> f32 {
-  let range = maxValue - minValue;
-  return value - range * floor((value - minValue) / range);
-}
-
-fn swayX(phase: f32, amplitude: f32) -> f32 {
-  return (sin(phase * 2.0) * 26.0 + sin(phase) * 16.0) * amplitude;
-}
-
-fn swayY(phase: f32, amplitude: f32) -> f32 {
-  return cos(phase * 2.2) * 13.0 * amplitude;
-}
-
-fn gustPulse(phase: f32) -> f32 {
-  return 0.55 + 0.45 * sin(phase * 0.18 + 2.0);
-}
-
-fn windXOffset(x: f32, y: f32, phase: f32) -> f32 {
-  let wind = sin(x * 0.006 + phase * 0.8 + 1.3) * 16.0
-           + sin(y * 0.005 - phase * 0.35 + 0.7) * 20.0
-           + sin((x + y) * 0.0025 - phase * 0.12) * 22.0;
-  return wind * gustPulse(phase);
-}
-
-fn windZOffset(x: f32, y: f32, phase: f32) -> f32 {
-  return sin(x * 0.0035 + y * 0.0035 + phase * 0.25) * 45.0 * gustPulse(phase);
-}
+${WGSL_COMMON}
 
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform>       u:         Uniforms;
@@ -458,7 +446,7 @@ let _renderUniformBuf = null;
 /* ——— 绑定组 ———————————————————————————————— */
 
 /**
- * compute 绑定组：下标 = source 缓冲区下标，与 _currentSrc / 局部变量 src 同义。
+ * compute 绑定组：下标 = source 缓冲区下标，与 _currentSrc / 局部 src 同义。
  * 用「数组 + 下标」而不是两个变量，含义由语法保证——不依赖命名约定，也不会因为
  * 重命名或调整 _rebuildBindGroups 里的顺序而悄悄失效。0 号以 _buf0 为 source。
  *
@@ -525,8 +513,8 @@ const _renderPassDescriptor = {
 };
 
 /**
- * colorAttachment 引用缓存（V8 写法优化）：handleFrame 每帧只做一次
- * 模块上下文槽加载 + 属性写入，省去每帧两层属性寻址；取值一律走数组解构，
+ * colorAttachment 引用缓存：handleFrame 每帧少两层属性寻址。收益很小（远小于
+ * 一帧的 GPU 开销），保留它是因为零代价、且让热路径更短；取值一律走数组解构，
  * 不要写回 colorAttachments[0] 下标访问。
  *
  * @type {GPURenderPassColorAttachment}
@@ -569,7 +557,7 @@ let _workgroupCount = Math.ceil(500 / 64);
 /* ——— 3D 世界常量（动态） —————————————————— */
 
 /** @type {number} 世界 x 半宽（世界范围为 [-WORLD_HALF, WORLD_HALF]）。 */
-let WORLD_HALF = 2000;   // 初始值，稍后会被 _updateWorldSize 覆盖
+let WORLD_HALF = 2000; // 初始值，稍后会被 _updateWorldSize 覆盖
 
 /** @type {number} 世界 x 总宽。 */
 let WORLD_SIZE = 4000;
@@ -616,8 +604,17 @@ let _rafId = null;
 
 /* ——— 设备初始化 / 重试 ————————————————————— */
 
-/** @type {number} 设备初始化尝试次数（含首次），用于给丢失后的重试封顶。 */
+/** @type {number} 本轮初始化的尝试次数（成功后清零），用于给重试封顶。 */
 let _initAttempts = 0;
+
+/**
+ * @type {boolean} 是否曾经成功初始化过。
+ *
+ * 用来区分"首帧就失败"（例如机器根本没有 WebGPU，重试必然复现，不重试）与
+ * "曾经能跑、后来设备丢了"（值得重试）。不能用 _initAttempts 判断——它成功
+ * 后会清零，于是"计数器 > 1"不再等价于"曾经成功过"。
+ */
+let _everReady = false;
 
 /** @type {?number} 设备丢失后的重试定时器句柄。 */
 let _retryTimer = null;
@@ -625,7 +622,7 @@ let _retryTimer = null;
 /** @type {boolean} _initGPU 的重入保护。 */
 let _initializing = false;
 
-/** @type {number} 设备丢失后允许的最大初始化尝试次数（含首次）。 */
+/** @type {number} 单轮初始化允许的最大尝试次数（成功后清零，每轮重新计）。 */
 const MAX_INIT_ATTEMPTS = 3;
 
 /** @type {number} 设备丢失后的重试间隔（ms）。 */
@@ -694,7 +691,8 @@ function _shutdown() {
  * 设备丢失（驱动重置、切换独显/核显、DWM 重置等）通常是瞬态的，
  * 重新 requestAdapter + requestDevice 一般能拿回一个新设备；而
  * uncapturederror（校验错误）是确定性的，重试必然复现，因此不走这里。
- * 尝试次数以 MAX_INIT_ATTEMPTS 封顶、间隔 RETRY_DELAY_MS，避免无限重试刷屏。
+ * 尝试次数以 MAX_INIT_ATTEMPTS 封顶（每轮初始化独立计）、间隔 RETRY_DELAY_MS，
+ * 避免无限重试刷屏。
  *
  * @returns {void}
  */
@@ -715,15 +713,14 @@ function _scheduleRetry() {
 }
 
 /**
- * 初始化失败时的统一出口：致停；若本次已经是重试（_initAttempts > 1，
- * 说明首帧初始化曾经成功过），再安排下一次重试——首帧就失败的机器
- * （例如根本没有 WebGPU）不重试，避免无意义地反复尝试。
+ * 初始化失败时的统一出口：致停；只有"曾经成功初始化过"的机器才继续重试——
+ * 首帧就失败的机器（例如根本没有 WebGPU）重试必然复现，不安排重试。
  *
  * @returns {void}
  */
 function _abortInit() {
   _shutdown();
-  if (_initAttempts > 1) {
+  if (_everReady) {
     _scheduleRetry();
   }
 }
@@ -785,6 +782,9 @@ function _updateWorldSize() {
  */
 function _generateParticleData(n) {
   const data = new Float32Array(n * 8);
+  // 基础下落速度（世界单位/物理步，≈ −5.33）。它只是"基础运动"的尺度，速度
+  // 调节由滑杆经 speedFactor 在 compute shader 里统一缩放（aSpeed = 2000 时
+  // ×0.75 → 约 −4 单位/步）；下面据此做 ±45° 锥形扩散，模拟雪花各向飘落。
   const baseVy = (-8 * 40) / 60;
 
   for (let i = 0; i < n; i++) {
@@ -971,7 +971,8 @@ function _writeRenderUniforms() {
  * @returns {void}
  */
 function _guard(value, message) {
-  if (value == null) { // 同时覆盖 null 和 undefined
+  if (value == null) {
+    // 同时覆盖 null 和 undefined
     throw new Error(message);
   }
 }
@@ -1095,17 +1096,19 @@ async function _initGPUResources() {
     });
 
     _computeUniformBuf = _device.createBuffer({
-      size: 28,  // 7 个字段（cameraZ + u32 count）
+      size: 28, // 7 个字段（cameraZ + u32 count）
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     _renderUniformBuf = _device.createBuffer({
-      size: 48,  // 12 个 f32
+      size: 48, // 12 个 f32
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     const computeModule = _device.createShaderModule({ code: COMPUTE_SHADER });
     const vertexModule = _device.createShaderModule({ code: VERTEX_SHADER });
-    const fragmentModule = _device.createShaderModule({ code: FRAGMENT_SHADER });
+    const fragmentModule = _device.createShaderModule({
+      code: FRAGMENT_SHADER,
+    });
 
     _computePipeline = _device.createComputePipeline({
       layout: 'auto',
@@ -1152,6 +1155,12 @@ async function _initGPUResources() {
     // 决定，因此同比例换分辨率（1080p → 4K）不改变任何边界。
     _updateWorldSize();
     _uploadFreshParticleData();
+
+    // 初始化成功：清空本轮尝试计数，并记下"这台机器能跑 WebGPU"。计数清零让
+    // 下一次设备丢失重新拿到完整的重试预算（否则它会跨进程累加，几次丢失之后
+    // 就永久退化成纯 CSS 背景）；_everReady 让后续失败仍然值得重试。
+    _initAttempts = 0;
+    _everReady = true;
 
     // 竞态兜底：settings.js 在模块加载时（设备就绪前）就调用了 start()，
     // 彼时 _device 为 null 会被跳过——若不在设备就绪后重启循环，帧循环
@@ -1428,7 +1437,9 @@ export function setCount(n) {
     v = 500;
   } else {
     const x = Number(n);
-    v = Number.isFinite(x) ? Math.max(0, Math.min(MAX_COUNT, Math.floor(x))) : 500;
+    v = Number.isFinite(x)
+      ? Math.max(0, Math.min(MAX_COUNT, Math.floor(x)))
+      : 500;
   }
 
   if (v !== _count) {
