@@ -44,6 +44,12 @@ if (!canvas) {
 /** @type {number} */
 const FAR_PLANE_OFFSET = 1000;
 
+// 物理步率（Hz）：JS 的步长（FIXED_STEP）、WGSL 的相位推进（PHASE_PER_STEP）与
+// 顶点外推的"分数步 → 相位"换算共用同一个值——三者必须一致，否则风场周期相对真实
+// 秒数漂移、或渲染外推与物理步进相位错配。同样必须在着色器模板之前定义。
+/** @type {number} */
+const PHYSICS_HZ = 60;
+
 /* ————————————————————————————————————————————
  *  WGSL 着色器
  * ———————————————————————————————————————————— */
@@ -150,7 +156,7 @@ struct Uniforms {
   particleRadius: f32,
   pink:           f32,
   extrapFactor:   f32,   // speedFactor × (accum / FIXED_STEP)，0 时不外推
-  extrapPhase:    f32,   // (accum / FIXED_STEP) / 60：分数步对应的相位增量
+  extrapPhase:    f32,   // (accum / FIXED_STEP) / PHYSICS_HZ：分数步对应的相位增量
   worldHalf:      f32,   // 动态世界 x 半宽（由 JS 根据视锥计算）
   yHalf:          f32,   // 盒子世界：y 半高
   zMin:           f32,   // 盒子世界：z 下限
@@ -190,7 +196,7 @@ ${WGSL_COMMON}
 // 每个固定物理步（FIXED_STEP = 1/60 秒）推进的相位量：1/60 相位 = 1 秒真实
 // 时间。风场与阵风的时间尺度因此与 aSpeed 滑杆（speedFactor）解耦——与把
 // 风场移入物理位置之前用真实秒数当相位的行为一致。
-const PHASE_PER_STEP: f32 = 1.0 / 60.0;
+const PHASE_PER_STEP: f32 = 1.0 / f32(${PHYSICS_HZ});
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -519,7 +525,7 @@ const _renderUniformData = new Float32Array(12);
  * 每帧 render uniform 临时缓冲区（两个 f32，写入 offset 24）：
  * [extrapFactor, extrapPhase]——前者外推基础速度、后者外推风场相位，都对应
  * 同一段"剩余分数步"（extrapFactor = speedFactor × 分数步，
- * extrapPhase = 分数步 / 60），由 handleFrame 每帧成对写入。
+ * extrapPhase = 分数步 / PHYSICS_HZ），由 handleFrame 每帧成对写入。
  *
  * @type {Float32Array}
  */
@@ -590,8 +596,8 @@ let _screenH;
 /** @type {number} 投影焦距。 */
 let _focalLength;
 
-/** @type {number} 固定物理步长（ms），对应 60fps。 */
-const FIXED_STEP = 1000 / 60;
+/** @type {number} 固定物理步长（ms），对应 PHYSICS_HZ。 */
+const FIXED_STEP = 1000 / PHYSICS_HZ;
 
 /** @type {number} 当前 workgroup 分发数 = ceil(count / 64)。 */
 let _workgroupCount = Math.ceil(DEFAULT_COUNT / 64);
@@ -991,7 +997,7 @@ function _writeRenderUniforms() {
   _renderUniformData[5] = _pink ? 1.0 : 0.0;
   // extrapFactor / extrapPhase：写入当前值（handleFrame 每帧刷新这两个字段）
   _renderUniformData[6] = _speedFactor * (_accum / FIXED_STEP);
-  _renderUniformData[7] = _accum / FIXED_STEP / 60;
+  _renderUniformData[7] = _accum / FIXED_STEP / PHYSICS_HZ;
   _renderUniformData[8] = _worldHalf;
   _renderUniformData[9] = _yHalf;
   _renderUniformData[10] = _zMin;
@@ -1282,7 +1288,7 @@ function handleFrame(timestamp) {
     // extrapFactor：基础速度的分数步外推；
     // extrapPhase：同一分数步对应的风场相位增量（整步为 1/60 相位 = 1 秒）。
     _extrapData[0] = _speedFactor * (_accum / FIXED_STEP);
-    _extrapData[1] = _accum / FIXED_STEP / 60;
+    _extrapData[1] = _accum / FIXED_STEP / PHYSICS_HZ;
     _queue.writeBuffer(_renderUniformBuf, 24, _extrapData);
 
     _colorAttachment.view = _context.getCurrentTexture().createView();
