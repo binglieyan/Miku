@@ -526,8 +526,8 @@ const _renderPassDescriptor = {
 
 /**
  * colorAttachment 引用缓存（V8 写法优化）：handleFrame 每帧只做一次
- * 模块上下文槽加载 + 属性写入，省去每帧两层属性寻址；用数组解构取出
- * （G.TYP.10），不要写成 colorAttachments[0] 下标访问。
+ * 模块上下文槽加载 + 属性写入，省去每帧两层属性寻址；取值一律走数组解构，
+ * 不要写回 colorAttachments[0] 下标访问。
  *
  * @type {GPURenderPassColorAttachment}
  */
@@ -1209,9 +1209,8 @@ function handleFrame(timestamp) {
   try {
     const encoder = _device.createCommandEncoder();
 
-    // compute 侧资源是否就绪（管线 + 两个 ping-pong 绑定组）。单独命名后
-    // 控制语句只剩两个条件——G.CTL.07 限制条件数量，超出的部分留在
-    // 赋值表达式里。
+    // compute 侧资源是否就绪（管线 + 两个 ping-pong 绑定组）。单独命名后，
+    // 下面这行 if 只表达"本帧是否有物理步进"，其余判断留在赋值表达式里。
     const computeReady =
       _computePipeline && _computeBindGroups[0] && _computeBindGroups[1];
     if (steps > 0 && computeReady) {

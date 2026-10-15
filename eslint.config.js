@@ -24,12 +24,12 @@ export default defineConfig([
 
   skipFormatting,
 
-  // 两条华为扫描规则的本地位：G.FMT.12（语句末尾必须有分号）与 G.NAM.03
-  // （变量小驼峰）。eslint-config-prettier 会关掉 semi，所以这段必须排在
-  // skipFormatting 之后；oxlint 不实现 semi / camelcase，只能由 eslint 兜。
-  // camelcase 默认不检查全大写常量（MAX_COUNT 之类），与扫描器行为一致。
+  // 只有 eslint 能提供的两条规则：semi（分号属于格式化，oxlint 不实现格式化
+  // 规则）与 camelcase（oxlint 无此规则）。eslint-config-prettier 会关掉
+  // semi，所以本块必须排在 skipFormatting 之后；camelcase 默认不检查全大写
+  // 常量（MAX_COUNT 之类）。
   {
-    name: 'app/huawei-style',
+    name: 'app/eslint-only-style',
     rules: {
       semi: ['error', 'always'],
       camelcase: 'error',

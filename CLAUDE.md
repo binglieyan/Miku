@@ -68,9 +68,9 @@ The `project.json` defines the wallpaper metadata and user-adjustable properties
 
 ## Linting & formatting configuration
 
-- **oxlint** (`.oxlintrc.json`): `correctness` category at error level, plugins: `eslint`, `unicorn`, `oxc`. Browser env.
-- **eslint** (`eslint.config.js`): Extends `@eslint/js` recommended, `eslint-config-prettier` (formatting rules skipped), oxlint plugin for compatibility. Browser globals.
-- **oxfmt** (`.oxfmtrc.json`): 2-space indent, single quotes, trailing commas, semicolons, 80-char print width.
+- **oxlint** (`.oxlintrc.json`): `correctness` category at error level, plugins: `eslint`, `unicorn`, `oxc`. Browser env. Four style rules — off by default — are enabled explicitly: `curly` (braces on every `if`/`for`/`while` body), `object-shorthand`, `prefer-arrow-callback`, `prefer-template`.
+- **eslint** (`eslint.config.js`): Extends `@eslint/js` recommended, `eslint-config-prettier` (formatting rules skipped), oxlint plugin for compatibility. Browser globals. One block, `app/eslint-only-style`, sits **after** `skipFormatting` and adds the two rules oxlint cannot provide: `semi` (re-enabled, because eslint-config-prettier turns it off) and `camelcase` (oxlint has no such rule; it deliberately ignores all-caps constants such as `MAX_COUNT`).
+- **oxfmt** (`.oxfmtrc.json`): 2-space indent, single quotes, trailing commas, semicolons, 80-char print width. Formatting rules live here rather than in the linters — oxlint implements none of them, so a formatting rule added to `.oxlintrc.json` fails with "Rule not found".
 
 ## Editor setup
 
