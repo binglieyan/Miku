@@ -48,10 +48,12 @@ window.wallpaperPropertyListener = {
    * @param {Object<string, {value: *}>} props - 变更的属性集合，key 为属性名，value 为 {value: ...}。
    * @returns {void}
    */
-  applyUserProperties: function (props) {
+  applyUserProperties(props) {
     // 引擎只会传对象；这一行避免 props 为空时整个回调抛异常，导致后面所有
     // 属性分支一起失效（各分支自身也都有类型强制，不会因取值异常抛出）。
-    if (!props) return;
+    if (!props) {
+      return;
+    }
 
     /** 粒子数量 */
     if (props.aNumber) {

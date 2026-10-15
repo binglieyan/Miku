@@ -457,17 +457,21 @@ let _renderUniformBuf = null;
 
 /* ——— 绑定组 ———————————————————————————————— */
 
-/** @type {?GPUBindGroup} */
-let _computeBG_AB = null;
+/**
+ * compute 绑定组：下标 = source 缓冲区下标，与 _currentSrc / 局部变量 src 同义。
+ * 用「数组 + 下标」而不是两个变量，含义由语法保证——不依赖命名约定，也不会因为
+ * 重命名或调整 _rebuildBindGroups 里的顺序而悄悄失效。0 号以 _buf0 为 source。
+ *
+ * @type {Array<?GPUBindGroup>}
+ */
+const _computeBindGroups = [null, null];
 
-/** @type {?GPUBindGroup} */
-let _computeBG_BA = null;
-
-/** @type {?GPUBindGroup} */
-let _renderBG_0 = null;
-
-/** @type {?GPUBindGroup} */
-let _renderBG_1 = null;
+/**
+ * render 绑定组：下标 = 要读取的缓冲区下标（与 _currentSrc 同义）。
+ *
+ * @type {Array<?GPUBindGroup>}
+ */
+const _renderBindGroups = [null, null];
 
 /**
  * Compute uniform 共用缓冲区（Float32Array 视图）。
@@ -522,11 +526,12 @@ const _renderPassDescriptor = {
 
 /**
  * colorAttachment 引用缓存（V8 写法优化）：handleFrame 每帧只做一次
- * 模块上下文槽加载 + 属性写入，省去每帧两层属性寻址。
+ * 模块上下文槽加载 + 属性写入，省去每帧两层属性寻址；用数组解构取出
+ * （G.TYP.10），不要写成 colorAttachments[0] 下标访问。
  *
  * @type {GPURenderPassColorAttachment}
  */
-const _colorAttachment = _renderPassDescriptor.colorAttachments[0];
+const [_colorAttachment] = _renderPassDescriptor.colorAttachments;
 
 /**
  * Queue submit 参数数组（预分配，避免每帧创建）。
@@ -668,10 +673,10 @@ function _shutdown() {
   _renderPipeline = null;
   _computeUniformBuf = null;
   _renderUniformBuf = null;
-  _computeBG_AB = null;
-  _computeBG_BA = null;
-  _renderBG_0 = null;
-  _renderBG_1 = null;
+  _computeBindGroups[0] = null;
+  _computeBindGroups[1] = null;
+  _renderBindGroups[0] = null;
+  _renderBindGroups[1] = null;
   // 有意不在这里清空画布：设备丢失后 GPU 提交会被丢弃（什么也提交不出去），
   // 而非 GPU 的清空手段（隐藏 canvas / 重置后备缓冲）会把"设备丢失到重试成功
   // 之间的约 2 秒"从"雪花静止"变成"雪花消失又回来"，对瞬态丢失反而更突兀；
@@ -694,14 +699,16 @@ function _shutdown() {
  * @returns {void}
  */
 function _scheduleRetry() {
-  if (_retryTimer !== null) return;
+  if (_retryTimer !== null) {
+    return;
+  }
   if (_initAttempts >= MAX_INIT_ATTEMPTS) {
     console.warn(
-      '[particles] 设备丢失后重试 ' + _initAttempts + ' 次仍未恢复，停止重试，回退到纯 CSS 背景',
+      `[particles] 设备丢失后重试 ${_initAttempts} 次仍未恢复，停止重试，回退到纯 CSS 背景`,
     );
     return;
   }
-  _retryTimer = setTimeout(function () {
+  _retryTimer = setTimeout(() => {
     _retryTimer = null;
     void _initGPU();
   }, RETRY_DELAY_MS);
@@ -716,7 +723,9 @@ function _scheduleRetry() {
  */
 function _abortInit() {
   _shutdown();
-  if (_initAttempts > 1) _scheduleRetry();
+  if (_initAttempts > 1) {
+    _scheduleRetry();
+  }
 }
 
 /**
@@ -810,15 +819,17 @@ function _generateParticleData(n) {
  * @returns {void}
  */
 function _createParticleBuffers() {
-  if (!_device) return;
+  if (!_device) {
+    return;
+  }
   const size = MAX_COUNT * 8 * 4;
 
   _buf0 = _device.createBuffer({
-    size: size,
+    size,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   _buf1 = _device.createBuffer({
-    size: size,
+    size,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
 
@@ -832,7 +843,9 @@ function _createParticleBuffers() {
  * @returns {void}
  */
 function _uploadFreshParticleData() {
-  if (!_queue || !_buf0 || !_buf1) return;
+  if (!_queue || !_buf0 || !_buf1) {
+    return;
+  }
   const data = _generateParticleData(MAX_COUNT);
   _queue.writeBuffer(_buf0, 0, data);
   _queue.writeBuffer(_buf1, 0, data);
@@ -840,17 +853,21 @@ function _uploadFreshParticleData() {
 }
 
 /**
- * 重建所有 GPU 绑定组（compute AB/BA + render 0/1）。
+ * 重建所有 GPU 绑定组（compute 与 render 各一对，下标 = source 缓冲区）。
  *
  * 依赖 _computePipeline、_renderPipeline、_buf0、_buf1 均已就绪。
  *
  * @returns {void}
  */
 function _rebuildBindGroups() {
-  if (!_buf0 || !_buf1) return;
-  if (!_computePipeline || !_renderPipeline) return;
+  if (!_buf0 || !_buf1) {
+    return;
+  }
+  if (!_computePipeline || !_renderPipeline) {
+    return;
+  }
 
-  _computeBG_AB = _device.createBindGroup({
+  _computeBindGroups[0] = _device.createBindGroup({
     layout: _computePipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf0 } },
@@ -859,7 +876,7 @@ function _rebuildBindGroups() {
     ],
   });
 
-  _computeBG_BA = _device.createBindGroup({
+  _computeBindGroups[1] = _device.createBindGroup({
     layout: _computePipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf1 } },
@@ -868,7 +885,7 @@ function _rebuildBindGroups() {
     ],
   });
 
-  _renderBG_0 = _device.createBindGroup({
+  _renderBindGroups[0] = _device.createBindGroup({
     layout: _renderPipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf0 } },
@@ -876,7 +893,7 @@ function _rebuildBindGroups() {
     ],
   });
 
-  _renderBG_1 = _device.createBindGroup({
+  _renderBindGroups[1] = _device.createBindGroup({
     layout: _renderPipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf1 } },
@@ -897,7 +914,9 @@ function _rebuildBindGroups() {
  * @returns {void}
  */
 function _writeComputeUniforms() {
-  if (!_queue || !_computeUniformBuf) return;
+  if (!_queue || !_computeUniformBuf) {
+    return;
+  }
   _computeUniformData[0] = _speedFactor;
   _computeUniformData[1] = WORLD_HALF;
   _computeUniformData[2] = Y_HALF;
@@ -919,7 +938,9 @@ function _writeComputeUniforms() {
  * @returns {void}
  */
 function _writeRenderUniforms() {
-  if (!_queue || !_renderUniformBuf) return;
+  if (!_queue || !_renderUniformBuf) {
+    return;
+  }
   _renderUniformData[0] = _focalLength;
   _renderUniformData[1] = CAMERA_Z;
   _renderUniformData[2] = W;
@@ -964,7 +985,9 @@ function _guard(value, message) {
  * @returns {Promise<void>}
  */
 async function _initGPU() {
-  if (_initializing || _device) return;
+  if (_initializing || _device) {
+    return;
+  }
   _initializing = true;
   _initAttempts++;
   try {
@@ -1032,8 +1055,10 @@ async function _initGPUResources() {
   // 再安排一次有上限的重试——这类丢失通常是瞬态的，重新取设备即可恢复。
   // 两道监听都以本次创建的 device 为准：重试成功后旧设备的迟到事件不得影响
   // 新设备（否则一个迟到的校验错误会把刚恢复的设备再打掉）。
-  _device.lost.then(function (info) {
-    if (_device !== thisDevice) return;
+  _device.lost.then((info) => {
+    if (_device !== thisDevice) {
+      return;
+    }
     console.warn('[particles] WebGPU 设备丢失:', info.reason, info.message);
     _shutdown();
     _scheduleRetry();
@@ -1043,8 +1068,10 @@ async function _initGPUResources() {
   // 事件——原先的 try/catch 抓不到这类错误。此处监听并统一致停，
   // 兑现"任何 GPU 异常停止循环"的行为约定，同时避免每帧重复报错刷屏。
   // 校验错误是确定性的，重试必然复现，因此这里不做重试。
-  _device.addEventListener('uncapturederror', function (ev) {
-    if (_device !== thisDevice) return;
+  _device.addEventListener('uncapturederror', (ev) => {
+    if (_device !== thisDevice) {
+      return;
+    }
     console.warn('[particles] 未捕获的 GPU 错误，粒子已停止:', ev.error);
     _shutdown();
   });
@@ -1157,10 +1184,16 @@ async function _initGPUResources() {
  * @returns {void}
  */
 function handleFrame(timestamp) {
-  if (!_device) return;
-  if (!_buf0 || _count <= 0) return;
+  if (!_device) {
+    return;
+  }
+  if (!_buf0 || _count <= 0) {
+    return;
+  }
 
-  if (!_lastTime) _lastTime = timestamp;
+  if (!_lastTime) {
+    _lastTime = timestamp;
+  }
 
   // 限制单帧增量，避免壁纸被挂起/切换回来后一次性补帧导致雪花瞬移
   const elapsed = Math.min(timestamp - _lastTime, 200);
@@ -1176,12 +1209,17 @@ function handleFrame(timestamp) {
   try {
     const encoder = _device.createCommandEncoder();
 
-    if (steps > 0 && _computePipeline && _computeBG_AB && _computeBG_BA) {
+    // compute 侧资源是否就绪（管线 + 两个 ping-pong 绑定组）。单独命名后
+    // 控制语句只剩两个条件——G.CTL.07 限制条件数量，超出的部分留在
+    // 赋值表达式里。
+    const computeReady =
+      _computePipeline && _computeBindGroups[0] && _computeBindGroups[1];
+    if (steps > 0 && computeReady) {
       const cp = encoder.beginComputePass();
       cp.setPipeline(_computePipeline);
       let src = _currentSrc;
       for (let s = 0; s < steps; s++) {
-        cp.setBindGroup(0, src === 0 ? _computeBG_AB : _computeBG_BA);
+        cp.setBindGroup(0, _computeBindGroups[src]);
         cp.dispatchWorkgroups(_workgroupCount);
         src = 1 - src;
       }
@@ -1200,9 +1238,9 @@ function handleFrame(timestamp) {
     _colorAttachment.view = _context.getCurrentTexture().createView();
     const rp = encoder.beginRenderPass(_renderPassDescriptor);
 
-    if (_renderPipeline && _renderBG_0 && _renderBG_1) {
+    if (_renderPipeline && _renderBindGroups[0] && _renderBindGroups[1]) {
       rp.setPipeline(_renderPipeline);
-      rp.setBindGroup(0, _currentSrc === 0 ? _renderBG_0 : _renderBG_1);
+      rp.setBindGroup(0, _renderBindGroups[_currentSrc]);
       rp.draw(4, _count);
     }
 
@@ -1248,7 +1286,9 @@ function frameLoop(timestamp) {
  * @returns {void}
  */
 function _clearParticles() {
-  if (!_device || !_context) return;
+  if (!_device || !_context) {
+    return;
+  }
   try {
     _colorAttachment.view = _context.getCurrentTexture().createView();
     const encoder = _device.createCommandEncoder();
@@ -1282,7 +1322,9 @@ let _dprQuery = null;
  * @returns {void}
  */
 function _applyCanvasSize() {
-  if (!canvas) return;
+  if (!canvas) {
+    return;
+  }
   const dpr = window.devicePixelRatio || 1;
   W = Math.max(1, Math.floor(window.innerWidth * dpr));
   H = Math.max(1, Math.floor(window.innerHeight * dpr));
@@ -1298,8 +1340,10 @@ function _applyCanvasSize() {
  * @returns {void}
  */
 function _scheduleCanvasRebuild() {
-  if (_resizeTimer !== null) clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(function () {
+  if (_resizeTimer !== null) {
+    clearTimeout(_resizeTimer);
+  }
+  _resizeTimer = setTimeout(() => {
     _resizeTimer = null;
     _applyCanvasSize();
     _watchDevicePixelRatio();
@@ -1327,15 +1371,19 @@ function _onDprChange() {
  * @returns {void}
  */
 function _watchDevicePixelRatio() {
-  if (typeof window.matchMedia !== 'function') return;
-  if (_dprQuery) _dprQuery.removeEventListener('change', _onDprChange);
+  if (typeof window.matchMedia !== 'function') {
+    return;
+  }
+  if (_dprQuery) {
+    _dprQuery.removeEventListener('change', _onDprChange);
+  }
   const dpr = window.devicePixelRatio || 1;
-  _dprQuery = window.matchMedia('(resolution: ' + dpr + 'dppx)');
+  _dprQuery = window.matchMedia(`(resolution: ${dpr}dppx)`);
   _dprQuery.addEventListener('change', _onDprChange);
 }
 
 // 窗口 resize 与 dpr 变化走同一条重建路径。
-window.addEventListener('resize', function () {
+window.addEventListener('resize', () => {
   _scheduleCanvasRebuild();
 });
 _watchDevicePixelRatio();
@@ -1353,7 +1401,9 @@ _watchDevicePixelRatio();
  * @returns {void}
  */
 export function start() {
-  if (_rafId !== null) return;
+  if (_rafId !== null) {
+    return;
+  }
   if (_device && _count > 0) {
     _rafId = requestAnimationFrame(frameLoop);
   }

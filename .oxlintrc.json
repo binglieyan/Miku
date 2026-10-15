@@ -6,5 +6,11 @@
   },
   "categories": {
     "correctness": "error"
+  },
+  "rules": {
+    "curly": "error",
+    "object-shorthand": "error",
+    "prefer-arrow-callback": "error",
+    "prefer-template": "error"
   }
 }

@@ -16,7 +16,9 @@
  * @returns {string} 对应的 CSS background-size 值。
  */
 function toCss(mode) {
-  if (mode === 'cover' || mode === 'contain') return mode;
+  if (mode === 'cover' || mode === 'contain') {
+    return mode;
+  }
   return 'auto';
 }
 
@@ -32,5 +34,7 @@ function toCss(mode) {
  */
 export function setDisplayMode(mode) {
   const el = document.getElementById('background');
-  if (el) el.style.backgroundSize = toCss(mode);
+  if (el) {
+    el.style.backgroundSize = toCss(mode);
+  }
 }
