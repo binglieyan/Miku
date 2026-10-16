@@ -912,24 +912,25 @@ function _generateParticleData(n) {
  * 按 MAX_COUNT 一次性分配，大小固定。
  * usage: STORAGE（shader 读写）+ COPY_DST（CPU 写入初始数据）。
  *
+ * 构造阶段的约定：设备一律由参数传入，不读模块状态——依赖关系因此写在签名里，
+ * 也避免"以为 _device 一定非空"这类隐含假设。
+ *
+ * @param {GPUDevice} device - 本次初始化拿到的设备。
  * @returns {void}
  */
-function _createParticleBuffers() {
-  if (!_device) {
-    return;
-  }
+function _createParticleBuffers(device) {
   const size = MAX_COUNT * 8 * 4;
 
-  _buf0 = _device.createBuffer({
+  _buf0 = device.createBuffer({
     size,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  _buf1 = _device.createBuffer({
+  _buf1 = device.createBuffer({
     size,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
 
-  _rebuildBindGroups();
+  _rebuildBindGroups(device);
 }
 
 /**
@@ -951,11 +952,13 @@ function _uploadFreshParticleData() {
 /**
  * 重建所有 GPU 绑定组（compute 与 render 各一对，下标 = source 缓冲区）。
  *
- * 依赖 _computePipeline、_renderPipeline、_buf0、_buf1 均已就绪。
+ * 前置条件由 _createParticleBuffers 保证：device 有效，且 _computePipeline、
+ * _renderPipeline、_buf0、_buf1 与两个 uniform 缓冲区均已就绪。
  *
+ * @param {GPUDevice} device - 由 _createParticleBuffers 传入的设备。
  * @returns {void}
  */
-function _rebuildBindGroups() {
+function _rebuildBindGroups(device) {
   if (!_buf0 || !_buf1) {
     return;
   }
@@ -963,7 +966,7 @@ function _rebuildBindGroups() {
     return;
   }
 
-  _computeBindGroups[0] = _device.createBindGroup({
+  _computeBindGroups[0] = device.createBindGroup({
     layout: _computePipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf0 } },
@@ -972,7 +975,7 @@ function _rebuildBindGroups() {
     ],
   });
 
-  _computeBindGroups[1] = _device.createBindGroup({
+  _computeBindGroups[1] = device.createBindGroup({
     layout: _computePipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf1 } },
@@ -981,7 +984,7 @@ function _rebuildBindGroups() {
     ],
   });
 
-  _renderBindGroups[0] = _device.createBindGroup({
+  _renderBindGroups[0] = device.createBindGroup({
     layout: _renderPipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf0 } },
@@ -989,7 +992,7 @@ function _rebuildBindGroups() {
     ],
   });
 
-  _renderBindGroups[1] = _device.createBindGroup({
+  _renderBindGroups[1] = device.createBindGroup({
     layout: _renderPipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: _buf1 } },
@@ -1175,14 +1178,15 @@ function _wireDeviceListeners(device) {
  * count），render 的是 12 个 f32。字段顺序与 JS 索引写入的对应关系见
  * _writeComputeUniforms / _writeRenderUniforms。
  *
+ * @param {GPUDevice} device - 本次初始化拿到的设备。
  * @returns {void}
  */
-function _createUniformBuffers() {
-  _computeUniformBuf = _device.createBuffer({
+function _createUniformBuffers(device) {
+  _computeUniformBuf = device.createBuffer({
     size: 28, // 7 个字段（cameraZ + u32 count）
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-  _renderUniformBuf = _device.createBuffer({
+  _renderUniformBuf = device.createBuffer({
     size: 48, // 12 个 f32
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
@@ -1193,20 +1197,21 @@ function _createUniformBuffers() {
  *
  * 着色器模块只在这里用一次，因此不做模块级状态。
  *
+ * @param {GPUDevice} device - 本次初始化拿到的设备。
  * @returns {void}
  */
-function _createPipelines() {
-  const computeModule = _device.createShaderModule({ code: COMPUTE_SHADER });
-  const vertexModule = _device.createShaderModule({ code: VERTEX_SHADER });
-  const fragmentModule = _device.createShaderModule({
+function _createPipelines(device) {
+  const computeModule = device.createShaderModule({ code: COMPUTE_SHADER });
+  const vertexModule = device.createShaderModule({ code: VERTEX_SHADER });
+  const fragmentModule = device.createShaderModule({
     code: FRAGMENT_SHADER,
   });
 
-  _computePipeline = _device.createComputePipeline({
+  _computePipeline = device.createComputePipeline({
     layout: 'auto',
     compute: { module: computeModule, entryPoint: 'main' },
   });
-  _renderPipeline = _createRenderPipeline(vertexModule, fragmentModule);
+  _renderPipeline = _createRenderPipeline(device, vertexModule, fragmentModule);
 }
 
 /**
@@ -1216,12 +1221,13 @@ function _createPipelines() {
  * srcFactor=one、dstFactor=one-minus-src-alpha，混合结果因此仍是预乘的。
  * 顶点无缓冲区（四边形由 vertex_index 推出），拓扑为 triangle-strip。
  *
+ * @param {GPUDevice} device - 本次初始化拿到的设备。
  * @param {GPUShaderModule} vertexModule - 顶点着色器模块。
  * @param {GPUShaderModule} fragmentModule - 片元着色器模块。
  * @returns {GPURenderPipeline}
  */
-function _createRenderPipeline(vertexModule, fragmentModule) {
-  return _device.createRenderPipeline({
+function _createRenderPipeline(device, vertexModule, fragmentModule) {
+  return device.createRenderPipeline({
     layout: 'auto',
     vertex: {
       module: vertexModule,
@@ -1264,6 +1270,9 @@ function _createRenderPipeline(vertexModule, fragmentModule) {
  * 再调用既有的 _createParticleBuffers() / _updateWorldSize() /
  * _uploadFreshParticleData()。
  *
+ * 构造阶段的助手一律收 device 参数（依赖写在签名里，不读模块状态）；只有运行期
+ * 操作（写 uniform、清屏、帧内编码）才读 _device/_queue 并各自守卫。
+ *
  * 无参：就绪时直接读取 canvas 当前尺寸计算 _screenW/_screenH/焦距——避免异步
  * 初始化期间发生 resize 后，用启动时的旧尺寸覆盖新尺寸的竞态。
  *
@@ -1304,7 +1313,7 @@ async function _initGPUResources() {
     _guard(_context, '获取 webgpu 上下文失败');
     _format = navigator.gpu.getPreferredCanvasFormat();
     _context.configure({
-      device: _device,
+      device,
       format: _format,
       alphaMode: 'premultiplied',
       // 画布纹理只作为渲染附件使用（没有任何 copyTextureToBuffer /
@@ -1312,10 +1321,10 @@ async function _initGPUResources() {
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
 
-    _createUniformBuffers();
-    _createPipelines();
+    _createUniformBuffers(device);
+    _createPipelines(device);
 
-    _createParticleBuffers();
+    _createParticleBuffers(device);
     // 先按当前 canvas 尺寸定好世界，再播种粒子：异步初始化期间若发生过
     // resize，这里算出的才是这颗 canvas 真正要用的盒子。世界尺寸只由宽高比
     // 决定，因此同比例换分辨率（1080p → 4K）不改变任何边界。
