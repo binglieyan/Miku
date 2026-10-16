@@ -4,10 +4,19 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "checkJs": true,
-    "strict": false,
     "noEmit": true,
     "types": ["@webgpu/types"],
-    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+
+    // 除 strictNullChecks 之外全开（noImplicitAny / strictFunctionTypes /
+    // noImplicitThis / alwaysStrict / useUnknownInCatchVariables 等，本仓库 0 报错）。
+    // strictNullChecks 有意关闭：模块级 GPU 状态是"初始化前为 null、之后一直非空"，
+    // 由各函数的运行时守卫（if (!_device) return 之类）保证；类型系统看不到这层
+    // 不变式，开启后只会在 30 处要求断言。
+    // 代价要记住：关闭它意味着 JSDoc 里的 ?T / | null 只起文档作用，不产生检查效果，
+    // 因此这些状态必须靠运行时守卫兜住。
+    "strict": true,
+    "strictNullChecks": false
   },
   "include": ["js/**/*.js", "types/**/*.d.ts", "index.html"],
   "exclude": ["node_modules", "dist"]

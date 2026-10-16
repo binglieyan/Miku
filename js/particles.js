@@ -1615,6 +1615,9 @@ export function setCount(n) {
 
     // 0 粒子：停循环并清空画布（否则残留最后一帧的静止雪花）；
     // >0 且设备就绪且循环未运行：重启循环。
+    // 这里只查 _device 就够：初始化路径在拿到设备之后是全同步的（不再 await），
+    // 所以不存在"设备已就绪但缓冲区/上下文还没建好"的可观测窗口——handleFrame
+    // 可以只以 _device 为门控。
     if (v === 0) {
       if (_rafId !== null) {
         cancelAnimationFrame(_rafId);

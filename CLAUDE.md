@@ -82,8 +82,9 @@ The detailed design lives in the `js/particles.js` JSDoc, which is kept in sync 
 
 ## Editor setup
 
-`jsconfig.json` enables `checkJs` (with `strict: false`, `@webgpu/types`, `moduleResolution: "bundler"`) and includes `types/**/*.d.ts`; a check with TypeScript 7 is clean, though `tsc` is not a repo dependency. Two non-obvious constraints keep it clean, so do not undo them:
+`jsconfig.json` enables `checkJs` with `strict: true` **except `strictNullChecks`**, plus `@webgpu/types` and `moduleResolution: "bundler"`, and includes `types/**/*.d.ts`. A check with TypeScript 7 is clean, though `tsc` is not a repo dependency. Three non-obvious constraints keep it clean, so do not undo them:
 
+- `strictNullChecks` is deliberately **off**: the module-level GPU state is "null until init, non-null afterwards", enforced by runtime guards (`if (!_device) return;`), and the type system cannot see that invariant — turning it on costs ~30 assertions and fixes no bug. Consequence to remember: under this setting `?T` / `| null` annotations are documentation only, so those states must be guarded at runtime.
 - `types/wallpaper-engine.d.ts` declares the engine's non-standard global `window.wallpaperPropertyListener`. Without that declaration TS reports an unknown property **and silently skips checking the literal assigned to it**, which would leave the bridge's callback signature unverified.
 - TS 7 mis-applies a JSDoc type annotation written *on a destructuring declaration* (it blames the element type for missing an iterator, and a plain number array reproduces it), so `_colorAttachment` is deliberately left unannotated — its type is inferred.
 
