@@ -871,14 +871,15 @@ function _updateWorldSize() {
  */
 function _generateParticleData(n) {
   const data = new Float32Array(n * 8);
-  // 基础下落速度（世界单位/物理步，≈ −5.33）。它只是"基础运动"的尺度，速度
-  // 调节由滑杆经 speedFactor 在 compute shader 里统一缩放（aSpeed = 2000 时
-  // ×0.75 → 约 −4 单位/步）；下面据此做 ±45° 锥形扩散，模拟雪花各向飘落。
+  // 基础下落速度（世界单位/物理步，≈ −5.33）：−8 是初始速度，×40 是调参得到
+  // 的尺度比例，÷ PHYSICS_HZ 则是"每秒 ↔ 每帧（每物理步）"的换算率——除数
+  // 60 就是步率本身。所以这一项必须写成 PHYSICS_HZ：换算关系是它的语义，改
+  // 步率时它要跟着走，否则会连带改掉观感落速。
   //
-  // 末项 / 60 没走 PHYSICS_HZ：它读作"每秒若干单位 ÷ 步率"，数值上恰好等于
-  // 步率，但原意已无从确认（调参留下的尺度）。若将来改 PHYSICS_HZ，先决定
-  // 要不要保住观感落速——要保就得让这一项跟着步率走，不保则维持字面量。
-  const baseVy = (-8 * 40) / 60;
+  // 它只是"基础运动"的尺度，速度调节由滑杆经 speedFactor 在 compute shader 里
+  // 统一缩放（aSpeed = 2000 时 ×0.75 → 约 −4 单位/步）；下面据此做 ±45° 锥形
+  // 扩散，模拟雪花各向飘落。
+  const baseVy = (-8 * 40) / PHYSICS_HZ;
 
   for (let i = 0; i < n; i++) {
     const ax = randomRange(-45, 45) * TO_RAD;
