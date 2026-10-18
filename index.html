@@ -20,7 +20,7 @@
     }
 
     /*
-     * CSS 背景层常驻显示（不再有 WebGPU → CSS 回退切换）。
+     * CSS 背景层常驻显示。
      * canvas 为透明背景，粒子渲染在上层，浏览器合成器做图层叠加。
      * display mode 通过 JS 直接修改 background-size 属性切换。
      */
@@ -33,6 +33,8 @@
 
     canvas {
       position: fixed;
+      width: 100%;
+      height: 100%;
       inset: 0;
       z-index: 1;
       pointer-events: none;
