@@ -1,12 +1,12 @@
 {
 	"contentrating" : "Everyone",
-	"description" : "原画师:\n千夜QYS3 ( pixiv id: 7210261 )\n注: 已获得原画师授权。\n本壁纸代码采用 MIT 许可；背景原画不在该许可范围内，请勿单独提取或二次分发。",
+	"description" : "原画师:\n千夜QYS3 ( pixiv id: 7210261 )\n注: 已获得原画师授权。",
 	"file" : "index.html",
 	"general" : 
 	{
 		"properties" : 
 		{
-			"aNumber" :
+			"aNumber" : 
 			{
 				"index" : 0,
 				"max" : 1000,
@@ -72,7 +72,7 @@
 	"tags" : [ "Anime" ],
 	"title" : "[雪中Miku] [4k] [原画师: 千夜QYS3]",
 	"type" : "Web",
-	"version" : 10,
+	"version" : 11,
 	"visibility" : "public",
 	"workshopid" : "3755473060",
 	"workshopurl" : "steam://url/CommunityFilePage/3755473060"
