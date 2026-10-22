@@ -93,7 +93,7 @@ music\
 
 ### 怎么转成 flac
 
-**用 ffmpeg（一行命令，最省事）**
+**安装并使用 ffmpeg（一行命令，最省事）**
 
 ```bash
 ffmpeg -i "你的音乐.mp3" "bgm.flac"
