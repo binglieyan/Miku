@@ -1,6 +1,6 @@
 {
 	"contentrating" : "Everyone",
-	"description" : "原画师:\n千夜QYS3 ( pixiv id: 7210261 )\n注: 已获得原画师授权。\n\n── 背景音乐（默认关闭，仅支持 .flac）──\n若本作品包未附带 music/bgm.flac，可按下面四步自备：\n1. 在「已安装」里右键本壁纸 → 在资源管理器中打开\n2. 把音频放进 music 文件夹，改名为 bgm.flac\n3. 切换到别的壁纸再切回来（或重启 Wallpaper Engine）\n4. 属性面板里手动打开「播放背景音乐」（默认关闭）、音量不为 0\n\n注意：\n· 仅支持 .flac 格式。mp3 / m4a / wav / ogg 等不会播放，请先转成 flac\n· Workshop 更新会覆盖整个作品文件夹，更新后音乐需重新放入一次\n· 若音频由使用者自行提供，则不随本壁纸分发；其版权与使用范围由使用者自行确认",
+	"description" : "原画师：\n千夜QYS3（pixiv ID：7210261）\n注：已获得原画师授权。\n\n支持背景音乐（默认关闭，仅支持 .flac）\n\n本作品未附带 music/bgm.flac，可按下面四步自备：\n\n1. 在「已安装」里右键本壁纸 → 在资源管理器中打开。\n2. 把音频放进 music 文件夹，改名为 bgm.flac。\n3. 切换到别的壁纸再切回来（或重启 Wallpaper Engine）。\n4. 在属性面板里手动打开「播放背景音乐」（默认关闭），并确保音量不为 0。\n\n注意：\n· 仅支持 .flac 格式。mp3 / m4a / wav / ogg 等不会播放，请先转成 flac。\n· Workshop 更新会覆盖整个作品文件夹，更新后音乐需重新放入一次。\n· 若音频由使用者自行提供，则不随本壁纸分发；其版权与使用范围由使用者自行确认。\n\n作者推荐 BGM：Ólafur Arnalds《Near Light》。",
 	"file" : "index.html",
 	"general" : 
 	{
@@ -49,6 +49,14 @@
 				"type" : "combo",
 				"value" : "cover"
 			},
+			"custommusic" : 
+			{
+				"index" : 4,
+				"order" : 104,
+				"text" : "播放背景音乐（需 music/bgm.flac）",
+				"type" : "bool",
+				"value" : false
+			},
 			"custompink" : 
 			{
 				"index" : 3,
@@ -57,15 +65,7 @@
 				"type" : "bool",
 				"value" : false
 			},
-			"custommusic" :
-			{
-				"index" : 4,
-				"order" : 104,
-				"text" : "播放背景音乐（需 music/bgm.flac）",
-				"type" : "bool",
-				"value" : false
-			},
-			"customvolume" :
+			"customvolume" : 
 			{
 				"index" : 5,
 				"max" : 100,
@@ -89,8 +89,8 @@
 	"ratingviolence" : "none",
 	"tags" : [ "Anime" ],
 	"title" : "[雪中Miku] [4k] [原画师: 千夜QYS3]",
-	"type" : "Web",
-	"version" : 12,
+	"type" : "web",
+	"version" : 13,
 	"visibility" : "public",
 	"workshopid" : "3755473060",
 	"workshopurl" : "steam://url/CommunityFilePage/3755473060"
