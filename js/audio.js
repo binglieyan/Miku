@@ -12,9 +12,9 @@
  * 出现"点击播放"的提示，所以全程无声失败。开 / 关音乐时对 volume 做短斜坡，
  * 避免"啪"地切入或切断。
  *
- * 没有音频文件是预期状态，不是故障：project.json 的 custommusic 默认开启，
- * 引擎回传 true 后才会第一次 play()；若文件缺失，浏览器网络层会打一条 404，
- * 模块随后停止重试并提示一次，壁纸其余部分照常运行。
+ * 没有音频文件是预期状态，不是故障：project.json 的 custommusic 默认关闭，
+ * 只有引擎回传 true 后才会第一次 play()；若文件缺失，浏览器网络层会打一条
+ * 404，模块随后停止重试并提示一次，壁纸其余部分照常运行。
  *
  * <audio preload="none"> 仍然保留：它避免 HTML 解析阶段就请求文件，真正的
  * 首次请求发生在引擎回传属性之后。普通浏览器没有引擎回调，用 ?bgm=on 调试；
@@ -51,8 +51,11 @@ const FADE_MS = 1200;
 /** @type {number} 音量跟随时长（ms）：拖属性面板的音量滑块时用——短到跟手，长到不爆音。 */
 const VOLUME_MS = 140;
 
-/** @type {number} 斜坡步进（ms）：约一帧 60Hz；音频 quantum 更小，但这个台阶已不可闻。 */
+/** @type {number} 淡入 / 淡出步进（ms）：约一帧 60Hz；1.2s 内约 75 步。 */
 const FADE_STEP_MS = 16;
+
+/** @type {number} 音量滑块步进（ms）：140ms 斜坡用更细的步进，避免大跳出现台阶声。 */
+const VOLUME_STEP_MS = 6;
 
 /** @type {number} 淡入淡出的动态范围（dB）：0 音量按这个下限参与插值，避免 log(0)。 */
 const FADE_FLOOR_DB = -60;
@@ -80,11 +83,11 @@ let _volume = 0.35;
  * @type {boolean} 用户是否希望播放；false 时所有重试直接让路，不再消耗定时器。
  *
  * 模块初始值来自 DEV_AUTOPLAY（默认 false），**不是 project.json 的最终默认值**：
- * project.json 的 custommusic 默认 true，但必须等引擎回调才能确定用户保存的
+ * project.json 的 custommusic 默认 false，但必须等引擎回调才能确定用户保存的
  * 选择；在回调前主动 play() 会违背用户的保存值，也会在没有 bgm.flac 时提前
- * 打一条 404。引擎回传 true 后 setMusicEnabled() 才 play()。代价是：默认开启
- * 且没有文件时，这一次请求会产生一条浏览器 404；error 处理器会停止重试并
- * 只提示一次。
+ * 打一条 404。引擎回传 true 后 setMusicEnabled() 才 play()。默认关闭时没有
+ * 文件不会发起请求；用户手动开启后若文件缺失，这一次请求会产生一条浏览器
+ * 404，error 处理器会停止重试并只提示一次。
  */
 let _enabled = DEV_AUTOPLAY;
 
@@ -159,9 +162,10 @@ function volumeFromDb(db) {
  * @param {number} target - 目标音量 0–1。
  * @param {number} ms - 斜坡时长。
  * @param {() => void} [onDone] - 斜坡走完后的回调。
+ * @param {number} [stepMs] - 更新步进（ms）；长淡入用 16ms，短音量斜坡用 6ms。
  * @returns {void}
  */
-function rampTo(target, ms, onDone) {
+function rampTo(target, ms, onDone, stepMs = FADE_STEP_MS) {
   if (!audio) {
     return;
   }
@@ -185,6 +189,7 @@ function rampTo(target, ms, onDone) {
 
   const startedAt = performance.now();
   const duration = Math.max(1, ms);
+  const step = Math.max(1, stepMs);
 
   _rampTimer = setInterval(() => {
     const ratio = Math.min(1, (performance.now() - startedAt) / duration);
@@ -199,7 +204,7 @@ function rampTo(target, ms, onDone) {
       return;
     }
     audio.volume = clampVolume(volumeFromDb(fromDb + (toDb - fromDb) * ratio));
-  }, FADE_STEP_MS);
+  }, step);
 }
 
 /**
@@ -411,7 +416,7 @@ export function setVolume(level) {
   _volume = clampVolume(n / 100);
 
   if (audio && _enabled && !audio.paused) {
-    rampTo(_volume, VOLUME_MS);
+    rampTo(_volume, VOLUME_MS, undefined, VOLUME_STEP_MS);
   }
 }
 
