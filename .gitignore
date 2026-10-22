@@ -37,3 +37,9 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# 背景音乐：第三方音频作品不随仓库分发。
+# 本地文件照旧保留（Wallpaper Engine 从磁盘加载，不受影响），只是不进 git；
+# 若你确认音频是自己创作、CC0 或已获可分发的授权，删掉下面两行即可。
+music/*
+!music/README.md

@@ -22,6 +22,7 @@
 - **WebGPU 粒子系统** — 基于 compute shader 的 GPU 加速雪花物理模拟，支持最多 1000 个粒子同时渲染
 - **时间外推渲染** — 顶点着色器内对粒子位置进行时间外推，使动画与显示器刷新率解耦，告别帧率波动带来的卡顿感
 - **可调节参数** — 通过 Wallpaper Engine 属性面板实时调整粒子数量、降落速度、颜色（白/粉）和壁纸显示方式
+- **背景音乐** — 支持循环播放背景音乐，音量与开关均在属性面板内可调；浏览器自动播放策略拦截时静默退避重试，不弹任何提示打断壁纸观感
 - **CSS 图层叠加** — 背景图片由 CSS 层常驻渲染，WebGPU 透明 canvas 叠加粒子层，浏览器合成器高效合成
 - **零闪烁切换** — 粒子缓冲区按最大容量预分配，调整数量时只改 uniform 与分发数量（不重建缓冲区），已有粒子保持动画状态不重置
 - **4K 原生支持** — 针对高分辨率显示器优化，结合 `devicePixelRatio` 自适应画布分辨率
@@ -38,6 +39,14 @@
 | 粒子速度     | 滑块 | 500 – 3500             | 2000   | 数值越大雪花降落越慢          |
 | 壁纸显示方式 | 下拉 | 填充 / 等比缩放 / 原始尺寸 | 填充   | 控制背景图片的缩放方式        |
 | 使用粉色粒子 | 开关 | 开 / 关                | 关     | 开启后雪花变为粉色（#F5B3BC） |
+| 播放背景音乐 | 开关 | 开 / 关                | 关     | 需自备 `music/bgm.flac`；默认关闭，避免无音频时发起 404 请求 |
+| 背景音乐音量 | 滑块 | 0 – 100                | 35     | 调整时音量平滑过渡，不会突跳  |
+
+> **背景音乐需要自备音频文件（仅支持 `.flac`）**：把音频放进 `music/` 并改名成
+> `bgm.flac`，切换到别的壁纸再切回来即可。完整步骤（含扩展名被隐藏、Workshop
+> 更新覆盖等常见坑）见 **[`music/README.md`](music/README.md)**。
+> mp3 / m4a / wav / ogg 不会播放，需先转成 flac（`ffmpeg -i 你的音乐.mp3 bgm.flac`）。
+> 没有该文件时壁纸其余部分照常运行，控制台只提示一次加载失败。
 
 ---
 
@@ -50,9 +59,13 @@ Miku/
 ├── preview.jpg          # 创意工坊预览图
 ├── images/
 │   └── bg.png           # 4K 背景原画
+├── music/
+│   ├── README.md        # 「如何添加背景音乐」教程（对用户）
+│   └── bgm.flac         # 背景音乐（需自备，不入库）
 ├── js/
 │   ├── settings.js      # Wallpaper Engine 属性监听桥 — 引擎 ↔ JS 模块的桥梁
 │   ├── particles.js     # WebGPU 粒子系统 — compute/render pipeline、缓冲区管理、帧循环
+│   ├── audio.js         # 背景音乐 — 循环播放、淡入淡出、自动播放拦截的静默重试
 │   └── background.js    # 背景显示模式 — CSS background-size 切换
 ├── types/
 │   └── wallpaper-engine.d.ts   # 引擎注入的全局接口声明（供 IDE 类型检查）
@@ -70,6 +83,8 @@ window.wallpaperPropertyListener.applyUserProperties(props)
         ├──→ particles.setCount(n)       → GPU uniform 更新
         ├──→ particles.setSpeed(s)       → GPU uniform 更新
         ├──→ particles.setPink(bool)     → GPU uniform 更新
+        ├──→ audio.setVolume(level)      → <audio> volume 平滑过渡
+        ├──→ audio.setMusicEnabled(bool) → 淡入播放 / 淡出暂停
         └──→ background.setDisplayMode() → CSS background-size 更新
 ```
 
@@ -89,6 +104,17 @@ Render Pass（每帧）
 - **缓冲区策略**：两个存储缓冲区按 `MAX_COUNT = 1000` 预分配，ping-pong 交替读写；活跃粒子数由 uniform 控制，调整时无缓冲区重建
 - **固定步长物理**：物理模拟以 60fps 固定步长推进，不受显示器刷新率影响
 - **时间外推**：渲染时根据累加器余量外推粒子位置，消除物理步进与显示帧之间的时间差
+
+### 背景音乐
+
+音源是 `index.html` 里的 `<audio id="bgm" loop>`，`js/audio.js` 只负责播放策略：
+
+- **自动播放容错**：Chromium 可能以自动播放策略为由让 `play()` 直接 reject。被拦时不弹提示、不抛异常，而是静默指数退避重试（1s → 30s 封顶），并在任意用户交互、窗口重新聚焦或重新可见时立刻再试一次——桌面上不该出现「点击播放」的提示
+- **淡入淡出**：开启 / 关闭时对 `volume` 做 1.2s 斜坡，避免「啪」地切入或切断。斜坡在**分贝域**等速推进（线性幅度斜坡听感是"前快后慢"，一半时间就冲到 -6 dB），且进度按真实时间计算——定时器漂移或被后台节流时只是台阶变粗，时长不变
+- **音量跟手**：拖属性面板的音量滑块走 140ms 短斜坡（不是 1.2s），松手即到位；斜坡基于 `setInterval` 而非 `rAF`（壁纸失焦时 `rAF` 会被停掉，音量会卡在半路）
+- **无音乐时零请求**：`preload="none"` 加上开关默认关闭，没有 `bgm.flac` 时浏览器根本不会去抓这个文件，控制台保持干净——否则每次加载都会固定出现一条 404（那行由浏览器网络层打印，JS 拦不掉）
+- **文件缺失不致命**：`error` 事件触发后停止重试并提示一次，CSS 背景与粒子层不受影响
+- **音源格式**：硬编码 `music/bgm.flac`，**面向用户只宣称支持 `.flac`**——路径写死，多格式等于让用户改代码。FLAC 是开放编解码器，Chromium / CEF 必定能解，不受嵌入浏览器授权裁剪的影响；代价是体积约为同长度 320 kbps mp3 的 5–10 倍（32-bit / float 编码的 FLAC 不被支持，需 16/24-bit）
 
 ---
 
@@ -142,6 +168,8 @@ pnpm format        # oxfmt 代码格式化
 本项目的**源代码**采用 [MIT 许可证](LICENSE) 开源。
 
 **第三方美术素材不在该许可范围内**：`images/bg.png` 与 `preview.jpg` 是原画师 **千夜 QYS3**（Pixiv ID 7210261）的作品，已获授权在本壁纸项目中使用；它们不属于 MIT 许可所定义的 Software，不得单独提取、二次分发或用于其它项目。这一范围说明写在 [LICENSE](LICENSE) 正文之后的「License scope」一节。
+
+**背景音乐同样不在 MIT 许可范围内**：`music/` 下的音频文件由使用者自行提供，仓库不附带音频，也不对其授权状况做任何担保——请确认拥有它的使用与分发权利。
 
 ---
 

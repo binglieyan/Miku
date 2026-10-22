@@ -46,6 +46,18 @@
   <div id="background"></div>
   <canvas id="canvas"></canvas>
 
+  <!--
+    背景音乐。路径是硬编码的：把音频文件命名为 bgm.flac 放进 music/ 即可，
+    换其它格式就改下面的 src。本壁纸发行包内不含任何音频文件，用户自备，
+    操作步骤见 music/README.md。
+
+    preload="none" 是刻意的：发行包里没有这个文件，preload="auto" 会在解析
+    HTML 时就发起请求，控制台必然留下一条 404（那行是浏览器网络层打印的，
+    JS 拦不掉、改不了）。preload="none" 让请求推迟到用户真正开音乐时才发。
+    loop 由浏览器原生循环；自动播放被拦截时的容错见 js/audio.js。
+  -->
+  <audio id="bgm" src="music/bgm.flac" loop preload="none"></audio>
+
   <script type="module" src="js/settings.js"></script>
 </body>
 

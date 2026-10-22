@@ -8,16 +8,19 @@
  * 引擎在属性变更时调用 applyUserProperties，传入变更的属性集合。
  * 模块职责：纯转发，不做业务逻辑。
  *
- * 属性列表（本模块只处理这 4 项；project.json 里的 schemecolor 由引擎 UI 使用，
+ * 属性列表（本模块只处理这 6 项；project.json 里的 schemecolor 由引擎 UI 使用，
  * 不经 JS）：
  *   aNumber      — 雪花数量（slider, 0–1000, 默认 500）
  *   aSpeed       — 降落速度（slider, 500–3500, 默认 2000, 越大越慢）
  *   custompink   — 使用粉色粒子（bool, 默认 false）
  *   customcombo  — 壁纸显示方式（combo: cover / contain / auto）
+ *   custommusic  — 播放背景音乐（bool, 默认 false——包内无音频，默认不发起请求）
+ *   customvolume — 背景音乐音量（slider, 0–100, 默认 35）
  *
  * @module settings
  */
 
+import { setMusicEnabled, setVolume, start as startMusic } from './audio.js';
 import { setDisplayMode } from './background.js';
 import { start, setCount, setSpeed, setPink } from './particles.js';
 
@@ -81,6 +84,16 @@ window.wallpaperPropertyListener = {
     if (props.custompink) {
       setPink(props.custompink.value);
     }
+
+    /** 背景音乐开关 */
+    if (props.custommusic) {
+      setMusicEnabled(props.custommusic.value);
+    }
+
+    /** 背景音乐音量（0–100） */
+    if (props.customvolume) {
+      setVolume(props.customvolume.value);
+    }
   },
 };
 
@@ -90,3 +103,7 @@ window.wallpaperPropertyListener = {
 // start() 是空操作；真正的启动发生在 particles.js 的初始化成功路径（那里也调
 // start()，幂等），本行只表达"加载即申请启动"的意图。
 start();
+
+// 背景音乐：这里只登记"想播"的意图，默认是按关处理的——没有音频文件时
+// 不发起请求，控制台不会出现 404。等引擎回传 custommusic=true 才真正 play()。
+startMusic();
