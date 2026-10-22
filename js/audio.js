@@ -212,6 +212,11 @@ function play() {
 
   started.then(
     () => {
+      // play() 可能在用户关闭音乐之后才 resolve：此时不能再淡入，否则会
+      // 取消 setMusicEnabled(false) 正在进行的 fade-out，甚至跳过 pause。
+      if (!_enabled || _unavailable) {
+        return;
+      }
       _retryDelay = RETRY_MIN_MS;
       rampTo(_volume, FADE_MS);
     },
