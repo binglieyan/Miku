@@ -15,19 +15,19 @@
  *     壁纸上不该出现"点击播放"的提示，所以全程无声失败；
  *   - **淡入淡出**：开 / 关音乐时对 volume 做短斜坡，避免"啪"地切入或切断。
  *
- * 没有音频文件是**预期状态**，不是故障：`error` 事件后停止重试、只提示一次，
- * 壁纸其余部分照常运行。
+ * 没有音频文件是**预期状态**，不是故障：project.json 的 custommusic 默认开启，
+ * 引擎回传 true 后才会第一次 `play()`；若文件缺失，浏览器网络层会打一条 404，
+ * 模块随后停止重试并提示一次，壁纸其余部分照常运行。
  *
- * 为了让"没放音乐"这件事在控制台里也安静，两处配合：`<audio preload="none">`
- * 让浏览器不在解析 HTML 时就去抓文件，本模块的开关默认关闭、打开后才第一次
- * `play()`。否则浏览器会固定打一条 `404 / ERR_FILE_NOT_FOUND`，那行由网络层
- * 打印，JS 拦不掉也改写不了。
+ * `<audio preload="none">` 仍然保留：它避免 HTML 解析阶段就请求文件，真正的
+ * 首次请求发生在引擎回传属性之后。普通浏览器没有引擎回调，用 `?bgm=on` 调试；
+ * 否则模块内开关保持关闭。
  *
  * 与 particles.js 一样，缺少 `<audio>` 时模块**必须能成功求值**：它是入口
  * settings.js 的依赖，抛异常会连带打死属性桥。
  *
  * 属性（project.json）：
- *   custommusic  — 背景音乐开关（bool, 默认 false）
+ *   custommusic  — 背景音乐开关（bool, 默认 true）
  *   customvolume — 音量（slider, 0–100, 默认 35）
  *
  * @module audio
@@ -63,8 +63,8 @@ const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 30000;
 
 /**
- * 本地调试用：直接用浏览器打开 index.html 时没有引擎回传属性，音乐开关会一直
- * 是关的、听不到效果。加 `?bgm=on` 手动开启。
+ * 本地调试用：直接用浏览器打开 index.html 时没有引擎回传属性，模块内开关保持
+ * 关闭、听不到效果。加 `?bgm=on` 手动开启。
  */
 const DEV_AUTOPLAY = new URLSearchParams(location.search).get('bgm') === 'on';
 
@@ -76,11 +76,12 @@ let _volume = 0.35;
 /**
  * 用户是否希望播放；false 时所有重试直接让路，不再消耗定时器。
  *
- * **默认关闭。** 发行包里没有音频文件，默认就尝试播放的话，`play()` 会立刻
- * 触发一次加载，而浏览器网络层会把"文件不存在"打成一条
- * `Failed to load resource: 404` —— 这条日志由 Chromium 自己打印，JS 既拦不住
- * 也改写不了。对没放音乐的人，它就是纯噪音。所以改成等属性面板把开关打开，
- * 才第一次发起请求；那时文件是否存在已经是用户自己的选择。
+ * 模块初始值来自 DEV_AUTOPLAY（默认 false），**不是 project.json 的最终默认值**：
+ * project.json 的 custommusic 默认 true，但必须等引擎回调才能确定用户保存的
+ * 选择；在回调前主动 play() 会违背用户的保存值，也会在没有 bgm.flac 时提前
+ * 打一条 404。引擎回传 true 后 setMusicEnabled() 才 play()。代价是：默认开启
+ * 且没有文件时，这一次请求会产生一条浏览器 404；error 处理器会停止重试并
+ * 只提示一次。
  */
 let _enabled = DEV_AUTOPLAY;
 
