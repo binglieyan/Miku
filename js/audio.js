@@ -8,9 +8,10 @@
  * 本模块只负责播放策略，不碰音源本身：
  *
  *   - **循环**：由 `<audio loop>` 交给浏览器，模块不干预；
- *   - **自动播放容错**：Chromium 的自动播放策略可能让 `play()` 直接 reject。
- *     被拦时不弹提示、不抛异常，改为静默退避重试（1s → 30s 封顶），
- *     并在任意一次用户交互、窗口重新聚焦 / 重新可见时立刻再试一次。
+ *   - **自动播放容错**：Wallpaper Engine 的 CEF 放行壁纸自动播放；普通浏览器
+ *     预览可能按 Chromium 策略拒绝 `play()`。被拦时不弹提示、不抛异常，
+ *     改为静默退避重试（1s → 30s 封顶），并在壁纸页面收到用户交互、窗口
+ *     重新聚焦 / 重新可见时再试一次（属性面板点击不算页面手势）。
  *     壁纸上不该出现"点击播放"的提示，所以全程无声失败；
  *   - **淡入淡出**：开 / 关音乐时对 volume 做短斜坡，避免"啪"地切入或切断。
  *
@@ -51,7 +52,7 @@ const FADE_MS = 1200;
 /** 音量跟随时长（ms）：拖属性面板的音量滑块时用——短到跟手，长到不爆音。 */
 const VOLUME_MS = 140;
 
-/** 斜坡步进（ms）：约等于一次音频渲染 quantum，阶梯本身不可闻。 */
+/** 斜坡步进（ms）：约一帧 60Hz；音频 quantum 更小，但这个台阶已不可闻。 */
 const FADE_STEP_MS = 16;
 
 /** 淡入淡出的动态范围（dB）：0 音量按这个下限参与插值，避免 log(0)。 */
@@ -92,6 +93,14 @@ let _retryDelay = RETRY_MIN_MS;
 
 /** 音频文件本身不可用（缺失 / 解码失败）；此时重试没有意义。 */
 let _unavailable = false;
+
+/**
+ * 关闭状态下先把音量压到 0：避免页面加载时从 `HTMLMediaElement` 默认的
+ * `volume = 1` 起一条没有意义的 fade-out，也减少旧 ramp 与 `play()` 的竞态窗口。
+ */
+if (audio && !_enabled) {
+  audio.volume = 0;
+}
 
 /* ——— 内部实现 ————————————————————————————— */
 
@@ -150,10 +159,22 @@ function rampTo(target, ms, onDone) {
   }
 
   clearInterval(_rampTimer);
+  _rampTimer = 0;
 
   const to = clampVolume(target);
   const fromDb = volumeToDb(audio.volume);
   const toDb = volumeToDb(to);
+
+  // 同值时没必要跑一条空斜坡；0→0 还会在过程中写入 0.001（-60 dB），
+  // 到最后一步才归 0。直接写精确目标并完成。
+  if (fromDb === toDb) {
+    audio.volume = to;
+    if (onDone) {
+      onDone();
+    }
+    return;
+  }
+
   const startedAt = performance.now();
   const duration = Math.max(1, ms);
 
@@ -197,9 +218,19 @@ function scheduleRetry() {
  * @returns {void}
  */
 function play() {
+  // 任何一次显式播放都取消旧的退避计时器；否则成功播放后还会多一次空 timer。
+  clearTimeout(_retryTimer);
+  _retryTimer = 0;
+
   if (!audio || !_enabled || _unavailable || !audio.paused) {
     return;
   }
+
+  // 开始播放前取消可能仍在进行的旧淡入/淡出：典型场景是页面加载时
+  // setMusicEnabled(false) 起了一条 1→0 的 fade，用户在它结束前打开音乐。
+  // 不清掉的话，旧 interval 会在 play() pending 期间继续改 volume。
+  clearInterval(_rampTimer);
+  _rampTimer = 0;
 
   // 从 0 起淡入：即使被策略拦下，音量也停在 0，下一次重试没有副作用。
   audio.volume = 0;
@@ -236,7 +267,7 @@ function play() {
  * @returns {void}
  */
 function resume() {
-  if (!audio || !_enabled || !audio.paused) {
+  if (!audio || !_enabled || _unavailable || !audio.paused) {
     return;
   }
 
@@ -251,14 +282,33 @@ function resume() {
 if (audio) {
   // 文件缺失 / 解码失败：没有可播内容，停掉所有重试（否则每 30s 刷一条控制台）。
   audio.addEventListener('error', () => {
+    if (_unavailable) {
+      return;
+    }
     _unavailable = true;
     clearTimeout(_retryTimer);
     _retryTimer = 0;
+    clearInterval(_rampTimer);
+    _rampTimer = 0;
+    audio.pause();
+
+    const code = audio.error ? audio.error.code : 0;
+    const src = audio.getAttribute('src') || 'music/bgm.flac';
+    const reasons = [
+      '未知错误',
+      '加载被中止',
+      '文件读取/网络错误',
+      '音频解码失败（例如 32-bit float FLAC）',
+      '文件不存在或格式不支持',
+    ];
+    const reason = reasons[code] || '未知错误';
+
     // 浏览器自己会先打一条 `Failed to load resource: 404` / `ERR_FILE_NOT_FOUND`，
     // 那条改不掉也拦不住，所以这里紧接着把"该怎么做"讲清楚，让它不至于像报错。
     console.info(
       [
-        '[audio] 没有找到背景音乐 music/bgm.flac，安静运行中（壁纸其它功能不受影响）。',
+        `[audio] 音频加载失败（MediaError ${code}：${reason}）：${src}`,
+        '        安静运行中，壁纸其它功能不受影响。',
         '        要加音乐：把 .flac 文件放进 music/ 并改名成 bgm.flac，然后重新加载壁纸。',
         '        步骤见 music/README.md，或创意工坊页面上的说明。',
       ].join('\n'),
@@ -294,13 +344,19 @@ export function setMusicEnabled(enabled) {
 
   if (_enabled) {
     _retryDelay = RETRY_MIN_MS;
+    clearTimeout(_retryTimer);
+    _retryTimer = 0;
+
+    // 上次 error 后用户重新打开：无论此刻 paused 是什么状态，都先给文件
+    // 一次重新加载的机会，再决定 play 还是把淡出中的音量拉回去。
+    if (_unavailable) {
+      _unavailable = false;
+      audio.load(); // 重置媒体管线，重新走一遍加载
+    }
+
     if (audio.paused) {
       // 上一次可能因为文件不存在失败过。用户重新打开开关时给文件一次机会：
       // 也许他刚把 bgm.flac 放进去，不必为此重启整个壁纸。
-      if (_unavailable) {
-        _unavailable = false;
-        audio.load(); // 重置媒体管线，重新走一遍加载
-      }
       play();
     } else {
       // 已经出声（例如关闭后又迅速打开）：把淡出中被打断的音量拉回去。
@@ -332,8 +388,15 @@ export function setMusicEnabled(enabled) {
  * @returns {void}
  */
 export function setVolume(level) {
+  if (level == null) {
+    return;
+  }
   const n = Number(level);
-  _volume = clampVolume((Number.isFinite(n) ? n : 0) / 100);
+  if (!Number.isFinite(n)) {
+    return;
+  }
+
+  _volume = clampVolume(n / 100);
 
   if (audio && _enabled && !audio.paused) {
     rampTo(_volume, VOLUME_MS);

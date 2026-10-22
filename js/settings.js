@@ -85,14 +85,14 @@ window.wallpaperPropertyListener = {
       setPink(props.custompink.value);
     }
 
+    /** 背景音乐音量（0–100）：先设目标音量，再决定是否开始播放 */
+    if (props.customvolume) {
+      setVolume(props.customvolume.value);
+    }
+
     /** 背景音乐开关 */
     if (props.custommusic) {
       setMusicEnabled(props.custommusic.value);
-    }
-
-    /** 背景音乐音量（0–100） */
-    if (props.customvolume) {
-      setVolume(props.customvolume.value);
     }
   },
 };
