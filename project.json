@@ -1,9 +1,66 @@
 {
 	"contentrating" : "Everyone",
-	"description" : "原画师：\n千夜QYS3（pixiv ID：7210261）\n注：已获得原画师授权。\n\n支持背景音乐（默认关闭，仅支持 .flac）\n\n本作品未附带 music/bgm.flac，可按下面四步自备：\n\n1. 在「已安装」里右键本壁纸 → 在资源管理器中打开。\n2. 把音频放进 music 文件夹，改名为 bgm.flac。\n3. 切换到别的壁纸再切回来（或重启 Wallpaper Engine）。\n4. 在属性面板里手动打开「播放背景音乐」（默认关闭），并确保音量不为 0。\n\n注意：\n· 仅支持 .flac 格式。mp3 / m4a / wav / ogg 等不会播放，请先转成 flac。\n· Workshop 更新会覆盖整个作品文件夹，更新后音乐需重新放入一次。\n· 音频由使用者自行提供，不随本壁纸分发；其版权与使用范围由使用者自行确认。\n\n作者推荐 BGM：Ólafur Arnalds《Near Light》。",
+	"description" : "原画师：\r\n千夜QYS3（pixiv ID：7210261）\r\n注：已获得原画师授权。\r\n\r\n支持背景音乐（默认关闭，仅支持 .flac）\r\n\r\n本作品未附带 music/bgm.flac，可按下面四步自备：\r\n\r\n1. 在「已安装」里右键本壁纸 → 在资源管理器中打开。\r\n2. 把音频放进 music 文件夹，改名为 bgm.flac。\r\n3. 切换到别的壁纸再切回来（或重启 Wallpaper Engine）。\r\n4. 在属性面板里手动打开「播放背景音乐」（默认关闭），并确保音量不为 0。\r\n\r\n注意：\r\n· 仅支持 .flac 格式。mp3 / m4a / wav / ogg 等不会播放，请先转成 flac。\r\n· Workshop 更新会覆盖整个作品文件夹，更新后音乐需重新放入一次。\r\n· 音频由使用者自行提供，不随本壁纸分发；其版权与使用范围由使用者自行确认。\r\n\r\n作者推荐 BGM：Ólafur Arnalds《Near Light》。",
 	"file" : "index.html",
 	"general" : 
 	{
+		"localization" : 
+		{
+			"en-us" : 
+			{
+				"ui_12_hour" : "12-Hour",
+				"ui_24_hour" : "24-Hour",
+				"ui_background_music" : "Background Music (needs bgm.flac)",
+				"ui_display_mode" : "Display Mode",
+				"ui_fall_speed" : "Fall Speed",
+				"ui_fill" : "Fill",
+				"ui_fit" : "Fit",
+				"ui_music_volume" : "Music Volume",
+				"ui_offset_x" : "Horizontal Offset (+ = right)",
+				"ui_offset_y" : "Vertical Offset (+ = down)",
+				"ui_original_size" : "Original Size",
+				"ui_particle_count" : "Particle Count",
+				"ui_pink_particles" : "Pink Particles",
+				"ui_show_datetime" : "Show Date & Time",
+				"ui_time_format" : "Time Format (12/24h)"
+			},
+			"zh-chs" : 
+			{
+				"ui_12_hour" : "12 小时制",
+				"ui_24_hour" : "24 小时制",
+				"ui_background_music" : "播放背景音乐（需 music/bgm.flac）",
+				"ui_display_mode" : "壁纸显示方式",
+				"ui_fall_speed" : "粒子速度",
+				"ui_fill" : "填充",
+				"ui_fit" : "等比缩放",
+				"ui_music_volume" : "背景音乐音量",
+				"ui_offset_x" : "水平偏移（正数向右）",
+				"ui_offset_y" : "垂直偏移（正数向下）",
+				"ui_original_size" : "原始尺寸",
+				"ui_particle_count" : "粒子数量",
+				"ui_pink_particles" : "使用粉色粒子",
+				"ui_show_datetime" : "显示日期时间",
+				"ui_time_format" : "时间制式（12/24 小时）"
+			},
+			"zh-cht" : 
+			{
+				"ui_12_hour" : "12 小时制",
+				"ui_24_hour" : "24 小时制",
+				"ui_background_music" : "播放背景音乐（需 music/bgm.flac）",
+				"ui_display_mode" : "壁纸显示方式",
+				"ui_fall_speed" : "粒子速度",
+				"ui_fill" : "填充",
+				"ui_fit" : "等比缩放",
+				"ui_music_volume" : "背景音乐音量",
+				"ui_offset_x" : "水平偏移（正数向右）",
+				"ui_offset_y" : "垂直偏移（正数向下）",
+				"ui_original_size" : "原始尺寸",
+				"ui_particle_count" : "粒子数量",
+				"ui_pink_particles" : "使用粉色粒子",
+				"ui_show_datetime" : "显示日期时间",
+				"ui_time_format" : "时间制式（12/24 小时）"
+			}
+		},
 		"properties" : 
 		{
 			"aNumber" : 
@@ -49,6 +106,14 @@
 				"type" : "combo",
 				"value" : "cover"
 			},
+			"customdatetime" : 
+			{
+				"index" : 6,
+				"order" : 106,
+				"text" : "ui_show_datetime",
+				"type" : "bool",
+				"value" : true
+			},
 			"custommusic" : 
 			{
 				"index" : 4,
@@ -56,6 +121,26 @@
 				"text" : "ui_background_music",
 				"type" : "bool",
 				"value" : false
+			},
+			"customoffsetx" : 
+			{
+				"index" : 8,
+				"max" : 100,
+				"min" : -100,
+				"order" : 108,
+				"text" : "ui_offset_x",
+				"type" : "slider",
+				"value" : 100
+			},
+			"customoffsety" : 
+			{
+				"index" : 9,
+				"max" : 100,
+				"min" : -100,
+				"order" : 109,
+				"text" : "ui_offset_y",
+				"type" : "slider",
+				"value" : 95
 			},
 			"custompink" : 
 			{
@@ -65,28 +150,10 @@
 				"type" : "bool",
 				"value" : false
 			},
-			"customvolume" : 
-			{
-				"index" : 5,
-				"max" : 100,
-				"min" : 0,
-				"order" : 105,
-				"text" : "ui_music_volume",
-				"type" : "slider",
-				"value" : 35
-			},
-			"customdatetime" :
-			{
-				"index" : 6,
-				"order" : 106,
-				"text" : "ui_show_datetime",
-				"type" : "bool",
-				"value" : true
-			},
-			"customtimeformat" :
+			"customtimeformat" : 
 			{
 				"index" : 7,
-				"options" :
+				"options" : 
 				[
 					{
 						"label" : "ui_24_hour",
@@ -102,25 +169,15 @@
 				"type" : "combo",
 				"value" : "24"
 			},
-			"customoffsetx" :
+			"customvolume" : 
 			{
-				"index" : 8,
+				"index" : 5,
 				"max" : 100,
-				"min" : -100,
-				"order" : 108,
-				"text" : "ui_offset_x",
+				"min" : 0,
+				"order" : 105,
+				"text" : "ui_music_volume",
 				"type" : "slider",
-				"value" : 100
-			},
-			"customoffsety" :
-			{
-				"index" : 9,
-				"max" : 100,
-				"min" : -100,
-				"order" : 109,
-				"text" : "ui_offset_y",
-				"type" : "slider",
-				"value" : 95
+				"value" : 35
 			},
 			"schemecolor" : 
 			{
@@ -129,72 +186,17 @@
 				"type" : "color",
 				"value" : "0 0 0"
 			}
-		},
-		"localization" :
-		{
-			"en-us" :
-			{
-				"ui_particle_count" : "Particle Count",
-				"ui_fall_speed" : "Fall Speed",
-				"ui_display_mode" : "Display Mode",
-				"ui_fill" : "Fill",
-				"ui_fit" : "Fit",
-				"ui_original_size" : "Original Size",
-				"ui_background_music" : "Background Music (needs bgm.flac)",
-				"ui_pink_particles" : "Pink Particles",
-				"ui_music_volume" : "Music Volume",
-				"ui_show_datetime" : "Show Date & Time",
-				"ui_time_format" : "Time Format (12/24h)",
-				"ui_24_hour" : "24-Hour",
-				"ui_12_hour" : "12-Hour",
-				"ui_offset_x" : "Horizontal Offset (+ = right)",
-				"ui_offset_y" : "Vertical Offset (+ = down)"
-			},
-			"zh-chs" :
-			{
-				"ui_particle_count" : "粒子数量",
-				"ui_fall_speed" : "粒子速度",
-				"ui_display_mode" : "壁纸显示方式",
-				"ui_fill" : "填充",
-				"ui_fit" : "等比缩放",
-				"ui_original_size" : "原始尺寸",
-				"ui_background_music" : "播放背景音乐（需 music/bgm.flac）",
-				"ui_pink_particles" : "使用粉色粒子",
-				"ui_music_volume" : "背景音乐音量",
-				"ui_show_datetime" : "显示日期时间",
-				"ui_time_format" : "时间制式（12/24 小时）",
-				"ui_24_hour" : "24 小时制",
-				"ui_12_hour" : "12 小时制",
-				"ui_offset_x" : "水平偏移（正数向右）",
-				"ui_offset_y" : "垂直偏移（正数向下）"
-			},
-			"zh-cht" :
-			{
-				"ui_particle_count" : "粒子数量",
-				"ui_fall_speed" : "粒子速度",
-				"ui_display_mode" : "壁纸显示方式",
-				"ui_fill" : "填充",
-				"ui_fit" : "等比缩放",
-				"ui_original_size" : "原始尺寸",
-				"ui_background_music" : "播放背景音乐（需 music/bgm.flac）",
-				"ui_pink_particles" : "使用粉色粒子",
-				"ui_music_volume" : "背景音乐音量",
-				"ui_show_datetime" : "显示日期时间",
-				"ui_time_format" : "时间制式（12/24 小时）",
-				"ui_24_hour" : "24 小时制",
-				"ui_12_hour" : "12 小时制",
-				"ui_offset_x" : "水平偏移（正数向右）",
-				"ui_offset_y" : "垂直偏移（正数向下）"
-			}
 		}
 	},
 	"preview" : "preview.jpg",
 	"ratingsex" : "none",
 	"ratingviolence" : "none",
+	"snapshotformat" : -1,
+	"snapshotoverlay" : "",
 	"tags" : [ "Anime" ],
 	"title" : "[雪中Miku] [4k] [原画师: 千夜QYS3]",
 	"type" : "web",
-	"version" : 13,
+	"version" : 15,
 	"visibility" : "public",
 	"workshopid" : "3755473060",
 	"workshopurl" : "steam://url/CommunityFilePage/3755473060"
