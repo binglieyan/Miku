@@ -1,5 +1,7 @@
 # 雪中 Miku — Wallpaper Engine 动态壁纸
 
+[English](README.en.md)
+
 > **「雪中 Miku」** 是一张 4K 分辨率的 Wallpaper Engine 网页壁纸，以冬季雪景为背景，叠加 WebGPU 驱动的粒子雪花动画，营造静谧浪漫的冬日氛围。
 
 [![Steam 创意工坊](https://img.shields.io/badge/Steam-创意工坊-1a1a2e?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3755473060)
@@ -66,7 +68,8 @@ Miku/
 ├── images/
 │   └── bg.png           # 4K 背景原画
 ├── music/
-│   ├── README.md        # 「如何添加背景音乐」教程（对用户）
+│   ├── README.md        # 「如何添加背景音乐」教程（中文）
+│   ├── README.en.md     # 「如何添加背景音乐」教程（英文）
 │   └── bgm.flac         # 背景音乐（需自备，不入库）
 ├── js/
 │   ├── settings.js      # Wallpaper Engine 属性监听桥 — 引擎 ↔ JS 模块的桥梁
