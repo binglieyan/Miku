@@ -26,7 +26,7 @@
  * ———————————————————————————————————————————— */
 
 /** @type {?HTMLElement} */
-const root = document.getElementById('datetime');
+const clock = document.getElementById('datetime');
 
 /** @type {?HTMLElement} */
 const dateEl = document.getElementById('datetime-date');
@@ -34,7 +34,7 @@ const dateEl = document.getElementById('datetime-date');
 /** @type {?HTMLElement} */
 const timeEl = document.getElementById('datetime-time');
 
-if (!root || !dateEl || !timeEl) {
+if (!clock || !dateEl || !timeEl) {
   console.warn('[datetime] 未找到 #datetime，日期时间层已禁用');
 }
 
@@ -280,15 +280,15 @@ function clampOffset(value) {
  * @returns {void}
  */
 function applyPosition() {
-  if (!root) {
+  if (!clock) {
     return;
   }
 
   const x = (_offsetX + 100) / 2;
   const y = (_offsetY + 100) / 2;
-  root.style.left = `${x}%`;
-  root.style.top = `${y}%`;
-  root.style.transform = `translate(-${x}%, -${y}%)`;
+  clock.style.left = `${x}%`;
+  clock.style.top = `${y}%`;
+  clock.style.transform = `translate(-${x}%, -${y}%)`;
 }
 
 /**
@@ -393,8 +393,8 @@ export function setVisible(value) {
   }
 
   _visible = next;
-  if (root) {
-    root.hidden = !_visible;
+  if (clock) {
+    clock.hidden = !_visible;
   }
 
   if (!_started) {
@@ -440,7 +440,7 @@ export function start() {
   if (_started) {
     return;
   }
-  if (!root || !dateEl || !timeEl) {
+  if (!clock || !dateEl || !timeEl) {
     return;
   }
 
