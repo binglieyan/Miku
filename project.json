@@ -12,7 +12,7 @@
 				"max" : 1000,
 				"min" : 0,
 				"order" : 100,
-				"text" : "粒子数量",
+				"text" : "ui_particle_count",
 				"type" : "slider",
 				"value" : 500
 			},
@@ -22,7 +22,7 @@
 				"max" : 3500,
 				"min" : 500,
 				"order" : 101,
-				"text" : "粒子速度",
+				"text" : "ui_fall_speed",
 				"type" : "slider",
 				"value" : 2000
 			},
@@ -32,20 +32,20 @@
 				"options" : 
 				[
 					{
-						"label" : "填充",
+						"label" : "ui_fill",
 						"value" : "cover"
 					},
 					{
-						"label" : "等比缩放",
+						"label" : "ui_fit",
 						"value" : "contain"
 					},
 					{
-						"label" : "原始尺寸",
+						"label" : "ui_original_size",
 						"value" : "auto"
 					}
 				],
 				"order" : 102,
-				"text" : "壁纸显示方式",
+				"text" : "ui_display_mode",
 				"type" : "combo",
 				"value" : "cover"
 			},
@@ -53,7 +53,7 @@
 			{
 				"index" : 4,
 				"order" : 104,
-				"text" : "播放背景音乐（需 music/bgm.flac）",
+				"text" : "ui_background_music",
 				"type" : "bool",
 				"value" : false
 			},
@@ -61,7 +61,7 @@
 			{
 				"index" : 3,
 				"order" : 103,
-				"text" : "使用粉色粒子",
+				"text" : "ui_pink_particles",
 				"type" : "bool",
 				"value" : false
 			},
@@ -71,7 +71,7 @@
 				"max" : 100,
 				"min" : 0,
 				"order" : 105,
-				"text" : "背景音乐音量",
+				"text" : "ui_music_volume",
 				"type" : "slider",
 				"value" : 35
 			},
@@ -79,7 +79,7 @@
 			{
 				"index" : 6,
 				"order" : 106,
-				"text" : "显示日期时间",
+				"text" : "ui_show_datetime",
 				"type" : "bool",
 				"value" : true
 			},
@@ -89,16 +89,16 @@
 				"options" :
 				[
 					{
-						"label" : "24 小时制",
+						"label" : "ui_24_hour",
 						"value" : "24"
 					},
 					{
-						"label" : "12 小时制",
+						"label" : "ui_12_hour",
 						"value" : "12"
 					}
 				],
 				"order" : 107,
-				"text" : "时间制式（12/24 小时）",
+				"text" : "ui_time_format",
 				"type" : "combo",
 				"value" : "24"
 			},
@@ -108,7 +108,7 @@
 				"max" : 100,
 				"min" : -100,
 				"order" : 108,
-				"text" : "水平偏移（正数向右）",
+				"text" : "ui_offset_x",
 				"type" : "slider",
 				"value" : 100
 			},
@@ -118,7 +118,7 @@
 				"max" : 100,
 				"min" : -100,
 				"order" : 109,
-				"text" : "垂直偏移（正数向下）",
+				"text" : "ui_offset_y",
 				"type" : "slider",
 				"value" : 95
 			},
@@ -128,6 +128,45 @@
 				"text" : "ui_browse_properties_scheme_color",
 				"type" : "color",
 				"value" : "0 0 0"
+			}
+		},
+		"localization" :
+		{
+			"en-us" :
+			{
+				"ui_particle_count" : "Particle Count",
+				"ui_fall_speed" : "Fall Speed",
+				"ui_display_mode" : "Display Mode",
+				"ui_fill" : "Fill",
+				"ui_fit" : "Fit",
+				"ui_original_size" : "Original Size",
+				"ui_background_music" : "Background Music (needs bgm.flac)",
+				"ui_pink_particles" : "Pink Particles",
+				"ui_music_volume" : "Music Volume",
+				"ui_show_datetime" : "Show Date & Time",
+				"ui_time_format" : "Time Format (12/24h)",
+				"ui_24_hour" : "24-Hour",
+				"ui_12_hour" : "12-Hour",
+				"ui_offset_x" : "Horizontal Offset (+ = right)",
+				"ui_offset_y" : "Vertical Offset (+ = down)"
+			},
+			"zh-chs" :
+			{
+				"ui_particle_count" : "粒子数量",
+				"ui_fall_speed" : "粒子速度",
+				"ui_display_mode" : "壁纸显示方式",
+				"ui_fill" : "填充",
+				"ui_fit" : "等比缩放",
+				"ui_original_size" : "原始尺寸",
+				"ui_background_music" : "播放背景音乐（需 music/bgm.flac）",
+				"ui_pink_particles" : "使用粉色粒子",
+				"ui_music_volume" : "背景音乐音量",
+				"ui_show_datetime" : "显示日期时间",
+				"ui_time_format" : "时间制式（12/24 小时）",
+				"ui_24_hour" : "24 小时制",
+				"ui_12_hour" : "12 小时制",
+				"ui_offset_x" : "水平偏移（正数向右）",
+				"ui_offset_y" : "垂直偏移（正数向下）"
 			}
 		}
 	},
