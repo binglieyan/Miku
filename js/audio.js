@@ -24,7 +24,7 @@
  * settings.js 的依赖，抛异常会连带打死属性桥。
  *
  * 属性（project.json）：
- *   custommusic  — 背景音乐开关（bool, 默认 true）
+ *   custommusic  — 背景音乐开关（bool, 默认 false）
  *   customvolume — 音量（slider, 0–100, 默认 35）
  *
  * @module audio
@@ -344,7 +344,7 @@ if (audio) {
 }
 
 /* ————————————————————————————————————————————
- *  对外接口
+ *  公开 API
  * ———————————————————————————————————————————— */
 
 /**

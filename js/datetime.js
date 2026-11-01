@@ -25,8 +25,13 @@
  *  DOM 引用
  * ———————————————————————————————————————————— */
 
+/** @type {?HTMLElement} */
 const root = document.getElementById('datetime');
+
+/** @type {?HTMLElement} */
 const dateEl = document.getElementById('datetime-date');
+
+/** @type {?HTMLElement} */
 const timeEl = document.getElementById('datetime-time');
 
 if (!root || !dateEl || !timeEl) {
@@ -255,43 +260,6 @@ function detectLocale() {
 const _locale = LOCALES[detectLocale()];
 
 /**
- * @typedef {Object} ClockText
- * @property {string} date - 日期文本。
- * @property {string} time - 时间文本。
- */
-
-/**
- * 把 Date 格式化为日期和时间文本（纯函数，不读写 DOM）。
- *
- * @param {Date} now - 当前时间。
- * @returns {ClockText} 日期与时间文本。
- */
-export function formatClock(now) {
-  return {
-    date: _locale.formatDate(now),
-    time: _locale.formatTime(now, _hour12),
-  };
-}
-
-/**
- * 设置 12/24 小时制（由 Wallpaper Engine 的 customtimeformat 调用）。
- *
- * @param {string|number|boolean} value - 12/24，或布尔值。
- * @returns {void}
- */
-export function setTimeFormat(value) {
-  const next = value === '12' || value === 12 || value === true;
-  if (next === _hour12) {
-    return;
-  }
-
-  _hour12 = next;
-  if (_started && _visible) {
-    render(new Date());
-  }
-}
-
-/**
  * 把任意输入钳制到 -100..100。
  *
  * @param {*} value - 属性值。
@@ -321,57 +289,6 @@ function applyPosition() {
   root.style.left = `${x}%`;
   root.style.top = `${y}%`;
   root.style.transform = `translate(-${x}%, -${y}%)`;
-}
-
-/**
- * 设置水平偏移；负数向左，正数向右。
- *
- * @param {*} value - -100..100。
- * @returns {void}
- */
-export function setOffsetX(value) {
-  _offsetX = clampOffset(value);
-  applyPosition();
-}
-
-/**
- * 设置垂直偏移；正数向下，负数向上。
- *
- * @param {*} value - -100..100。
- * @returns {void}
- */
-export function setOffsetY(value) {
-  _offsetY = clampOffset(value);
-  applyPosition();
-}
-
-/**
- * 显示 / 隐藏日期时间层（由 customdatetime 控制）。
- *
- * @param {boolean} value - true 显示，false 隐藏。
- * @returns {void}
- */
-export function setVisible(value) {
-  const next = value !== false;
-  if (next === _visible) {
-    return;
-  }
-
-  _visible = next;
-  if (root) {
-    root.hidden = !_visible;
-  }
-
-  if (!_started) {
-    return;
-  }
-
-  if (_visible) {
-    resync();
-  } else {
-    clearTimeout(_timer);
-    _timer = 0;
-  }
 }
 
 /**
@@ -423,8 +340,96 @@ function resync() {
 }
 
 /* ————————————————————————————————————————————
- *  对外接口
+ *  公开 API
  * ———————————————————————————————————————————— */
+
+/**
+ * @typedef {Object} ClockText
+ * @property {string} date - 日期文本。
+ * @property {string} time - 时间文本。
+ */
+
+/**
+ * 把 Date 格式化为日期和时间文本（纯函数，不读写 DOM）。
+ *
+ * @param {Date} now - 当前时间。
+ * @returns {ClockText} 日期与时间文本。
+ */
+export function formatClock(now) {
+  return {
+    date: _locale.formatDate(now),
+    time: _locale.formatTime(now, _hour12),
+  };
+}
+
+/**
+ * 设置 12/24 小时制（由 Wallpaper Engine 的 customtimeformat 调用）。
+ *
+ * @param {string|number|boolean} value - 12/24，或布尔值。
+ * @returns {void}
+ */
+export function setTimeFormat(value) {
+  const next = value === '12' || value === 12 || value === true;
+  if (next === _hour12) {
+    return;
+  }
+
+  _hour12 = next;
+  if (_started && _visible) {
+    render(new Date());
+  }
+}
+
+/**
+ * 显示 / 隐藏日期时间层（由 customdatetime 控制）。
+ *
+ * @param {boolean} value - true 显示，false 隐藏。
+ * @returns {void}
+ */
+export function setVisible(value) {
+  const next = value !== false;
+  if (next === _visible) {
+    return;
+  }
+
+  _visible = next;
+  if (root) {
+    root.hidden = !_visible;
+  }
+
+  if (!_started) {
+    return;
+  }
+
+  if (_visible) {
+    resync();
+  } else {
+    clearTimeout(_timer);
+    _timer = 0;
+  }
+}
+
+/**
+ * 设置水平偏移；负数向左，正数向右。
+ *
+ * @param {*} value - -100..100。
+ * @returns {void}
+ */
+export function setOffsetX(value) {
+  _offsetX = clampOffset(value);
+  applyPosition();
+}
+
+/**
+ * 设置垂直偏移；正数向下，负数向上。
+ *
+ * @param {*} value - -100..100。
+ * @returns {void}
+ */
+export function setOffsetY(value) {
+  _offsetY = clampOffset(value);
+  applyPosition();
+}
 
 /**
  * 启动日期时间刷新（幂等）。
