@@ -75,6 +75,53 @@
 				"type" : "slider",
 				"value" : 35
 			},
+			"customdatetime" :
+			{
+				"index" : 6,
+				"order" : 106,
+				"text" : "显示日期时间",
+				"type" : "bool",
+				"value" : true
+			},
+			"customtimeformat" :
+			{
+				"index" : 7,
+				"options" :
+				[
+					{
+						"label" : "24 小时制",
+						"value" : "24"
+					},
+					{
+						"label" : "12 小时制",
+						"value" : "12"
+					}
+				],
+				"order" : 107,
+				"text" : "时间制式（12/24 小时）",
+				"type" : "combo",
+				"value" : "24"
+			},
+			"customoffsetx" :
+			{
+				"index" : 8,
+				"max" : 100,
+				"min" : -100,
+				"order" : 108,
+				"text" : "水平偏移（正数向右）",
+				"type" : "slider",
+				"value" : 100
+			},
+			"customoffsety" :
+			{
+				"index" : 9,
+				"max" : 100,
+				"min" : -100,
+				"order" : 109,
+				"text" : "垂直偏移（正数向下）",
+				"type" : "slider",
+				"value" : 95
+			},
 			"schemecolor" : 
 			{
 				"order" : 0,

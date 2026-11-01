@@ -8,20 +8,31 @@
  * 引擎在属性变更时调用 applyUserProperties，传入变更的属性集合。
  * 模块职责：纯转发，不做业务逻辑。
  *
- * 属性列表（本模块只处理这 6 项；project.json 里的 schemecolor 由引擎 UI 使用，
+ * 属性列表（本模块只处理这 10 项；project.json 里的 schemecolor 由引擎 UI 使用，
  * 不经 JS）：
- *   aNumber      — 雪花数量（slider, 0–1000, 默认 500）
- *   aSpeed       — 降落速度（slider, 500–3500, 默认 2000, 越大越慢）
- *   custompink   — 使用粉色粒子（bool, 默认 false）
- *   customcombo  — 壁纸显示方式（combo: cover / contain / auto）
- *   custommusic  — 播放背景音乐（bool, 默认 false——包内无音频，默认不发起请求）
- *   customvolume — 背景音乐音量（slider, 0–100, 默认 35）
+ *   aNumber          — 雪花数量（slider, 0–1000, 默认 500）
+ *   aSpeed           — 降落速度（slider, 500–3500, 默认 2000, 越大越慢）
+ *   custompink       — 使用粉色粒子（bool, 默认 false）
+ *   customcombo      — 壁纸显示方式（combo: cover / contain / auto）
+ *   custommusic      — 播放背景音乐（bool, 默认 false——包内无音频，默认不发起请求）
+ *   customvolume     — 背景音乐音量（slider, 0–100, 默认 35）
+ *   customdatetime   — 显示日期时间（bool, 默认 true）
+ *   customtimeformat — 时间制式（combo: 24 / 12, 默认 24）
+ *   customoffsetx    — 水平偏移（slider, -100–100, 默认 100，正数向右）
+ *   customoffsety    — 垂直偏移（slider, -100–100, 默认 95，正数向下）
  *
  * @module settings
  */
 
 import { setMusicEnabled, setVolume, start as startMusic } from './audio.js';
 import { setDisplayMode } from './background.js';
+import {
+  setOffsetX,
+  setOffsetY,
+  setTimeFormat,
+  setVisible,
+  start as startDatetime,
+} from './datetime.js';
 import { start, setCount, setSpeed, setPink } from './particles.js';
 
 /* ——— Wallpaper Engine 属性监听接口 ————————— */
@@ -85,6 +96,26 @@ window.wallpaperPropertyListener = {
       setPink(props.custompink.value);
     }
 
+    /** 日期时间显示开关 */
+    if (props.customdatetime) {
+      setVisible(props.customdatetime.value);
+    }
+
+    /** 时间制式：24 / 12 小时，独立于显示语言 */
+    if (props.customtimeformat) {
+      setTimeFormat(props.customtimeformat.value);
+    }
+
+    /** 水平偏移：正数向右，默认 100（右边缘） */
+    if (props.customoffsetx) {
+      setOffsetX(props.customoffsetx.value);
+    }
+
+    /** 垂直偏移：正数向下，默认 95（右下角） */
+    if (props.customoffsety) {
+      setOffsetY(props.customoffsety.value);
+    }
+
     /** 背景音乐音量（0–100）：先设目标音量，再决定是否开始播放 */
     if (props.customvolume) {
       setVolume(props.customvolume.value);
@@ -107,3 +138,6 @@ start();
 // 背景音乐：这里只登记"想播"的意图，默认是按关处理的——没有音频文件时
 // 不发起请求，控制台不会出现 404。等引擎回传 custommusic=true 才真正 play()。
 startMusic();
+
+// 右下角日期时间：启动时钟；显示开关与时制随后由属性回调控制。
+startDatetime();

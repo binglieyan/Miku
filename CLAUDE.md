@@ -23,7 +23,7 @@ Package manager: pnpm (`pnpm-lock.yaml`). The repo pins no version — there is 
 
 ## Architecture
 
-`index.html` loads one entry module (`<script type="module" src="js/settings.js">`), which imports the other two:
+`index.html` loads one entry module (`<script type="module" src="js/settings.js">`), which imports the other modules:
 
 | Module             | Responsibility                                                                                                                                                                                                                      |
 |--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -31,8 +31,9 @@ Package manager: pnpm (`pnpm-lock.yaml`). The repo pins no version — there is 
 | `js/background.js` | `setDisplayMode(mode)` switches CSS `background-size` on `#background` (`cover`/`contain`/`auto`).                                                                                                                                   |
 | `js/particles.js`  | WebGPU particle system (compute physics, instanced billboard quads, radial-gradient fragments). Exports `start()`, `setCount(n)`, `setSpeed(s)`, `setPink(bool)`.                                                                     |
 | `js/audio.js`      | BGM over the static `<audio id="bgm" loop>` in `index.html`. Exports `start()`, `setMusicEnabled(b)`, `setVolume(0–100)`. Owns autoplay-policy retry, fade in/out.                                                                    |
+| `js/datetime.js`   | Center-origin local date/time overlay inside a taskbar-safe layer, defaulted to the bottom-right through the two offset properties. Exports `start()`, pure `formatClock(now)`, `setTimeFormat(v)`, `setVisible(b)`, `setOffsetX(v)` and `setOffsetY(v)`; reads `#datetime` DOM, refreshes on second boundaries and on visibility change. Language comes from `Intl`/`navigator` when possible; because CEF often forces English, Chinese-region timezones are the fallback (all other locales stay English). `customtimeformat` switches 12/24-hour, `customdatetime` hides the overlay and stops its timer, and the offset properties move it. |
 
-**Data flow:** Wallpaper Engine → `wallpaperPropertyListener.applyUserProperties(props)` → per-property branch → GPU buffers / CSS.
+**Data flow:** Wallpaper Engine → `wallpaperPropertyListener.applyUserProperties(props)` → per-property branch → GPU buffers / CSS. `datetime.js` has no GPU state: its display language is browser-derived; it receives `customtimeformat`, `customdatetime` and the two offset properties from the engine, and `settings.js` also calls its `start()` during bootstrap.
 
 The detailed design lives in the `js/particles.js` JSDoc, which is kept in sync with the code; treat it as the reference for anything not stated below. What follows is the map plus the invariants that span files.
 
@@ -48,6 +49,10 @@ The detailed design lives in the `js/particles.js` JSDoc, which is kept in sync 
 | `custompink`  | bool   | —                      | false   | → `particles.setPink(b)`                                           |
 | `custommusic` | bool   | —                      | false   | → `audio.setMusicEnabled(b)`                                       |
 | `customvolume`| slider | 0–100                  | 35      | → `audio.setVolume(v)`                                             |
+| `customdatetime` | bool | —                    | true    | → `datetime.setVisible(b)`; hides the overlay and stops its timer   |
+| `customtimeformat` | combo | 24 / 12           | 24      | → `datetime.setTimeFormat(v)` (independent of display language)    |
+| `customoffsetx` | slider | -100–100              | 100     | → `datetime.setOffsetX(v)` (positive = right; default 100)          |
+| `customoffsety` | slider | -100–100              | 95      | → `datetime.setOffsetY(v)` (positive = down; default 95)            |
 
 `general.properties.schemecolor` is an engine-UI scheme color (order 0) — not handled in JS.
 

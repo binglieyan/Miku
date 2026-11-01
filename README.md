@@ -23,6 +23,7 @@
 - **时间外推渲染** — 顶点着色器内对粒子位置进行时间外推，使动画与显示器刷新率解耦，告别帧率波动带来的卡顿感
 - **可调节参数** — 通过 Wallpaper Engine 属性面板实时调整粒子数量、降落速度、颜色（白/粉）和壁纸显示方式
 - **背景音乐** — 默认关闭，支持循环播放；音量与开关均在属性面板内可调。Wallpaper Engine 正常自动播放，普通浏览器预览若被策略拦截则静默退避重试，不弹提示打断观感
+- **日期时间** — 以屏幕中心为基准，默认参数把组件放到右下角；优先跟随浏览器语言，CEF 把语言固定成英文时用系统时区兜底，中国 / 港澳台时区显示中文，其余英文；12/24 小时制、显隐和 X/Y 位置均可从属性面板独立控制，按整秒边界刷新
 - **CSS 图层叠加** — 背景图片由 CSS 层常驻渲染，WebGPU 透明 canvas 叠加粒子层，浏览器合成器高效合成
 - **零闪烁切换** — 粒子缓冲区按最大容量预分配，调整数量时只改 uniform 与分发数量（不重建缓冲区），已有粒子保持动画状态不重置
 - **4K 原生支持** — 针对高分辨率显示器优化，结合 `devicePixelRatio` 自适应画布分辨率
@@ -41,6 +42,10 @@
 | 使用粉色粒子 | 开关 | 开 / 关                | 关     | 开启后雪花变为粉色（#F5B3BC） |
 | 播放背景音乐 | 开关 | 开 / 关                | 关     | 需要 `music/bgm.flac`；默认关闭，避免无音频时发起 404 请求 |
 | 背景音乐音量 | 滑块 | 0 – 100                | 35     | 调整时音量平滑过渡，不会突跳  |
+| 显示日期时间 | 开关 | 开 / 关                | 开     | 关闭后右下角隐藏，并停止刷新定时器 |
+| 时间制式     | 下拉 | 24 小时 / 12 小时      | 24 小时 | 独立于中英文，切换 `HH:mm:ss` 或 `h:mm:ss AM/PM` |
+| 水平偏移     | 滑块 | -100 – 100             | 100    | 0 = 屏幕中心，-100 = 左边缘，100 = 右边缘；默认贴右边缘 |
+| 垂直偏移     | 滑块 | -100 – 100             | 95     | 0 = 屏幕中心，-100 = 上边缘，100 = 下边缘；默认靠近底部 |
 
 > **背景音乐默认关闭；仓库不附带音频文件（仅支持 `.flac`）**：如果你的壁纸包
 > 里没有 `music/bgm.flac`，把音频放进 `music/` 并改名成 `bgm.flac`，切换到别的
@@ -55,7 +60,7 @@
 
 ```
 Miku/
-├── index.html           # 入口 HTML — CSS 背景层 + WebGPU canvas 叠加
+├── index.html           # 入口 HTML — CSS 背景 + WebGPU canvas + 日期时间叠加
 ├── project.json         # Wallpaper Engine 壁纸元数据 & 属性定义
 ├── preview.jpg          # 创意工坊预览图
 ├── images/
@@ -67,6 +72,7 @@ Miku/
 │   ├── settings.js      # Wallpaper Engine 属性监听桥 — 引擎 ↔ JS 模块的桥梁
 │   ├── particles.js     # WebGPU 粒子系统 — compute/render pipeline、缓冲区管理、帧循环
 │   ├── audio.js         # 背景音乐 — 循环播放、淡入淡出、自动播放拦截的静默重试
+│   ├── datetime.js      # 右下角日期时间 — 本地时间、整秒对齐刷新
 │   └── background.js    # 背景显示模式 — CSS background-size 切换
 ├── types/
 │   └── wallpaper-engine.d.ts   # 引擎注入的全局接口声明（供 IDE 类型检查）
@@ -86,8 +92,14 @@ window.wallpaperPropertyListener.applyUserProperties(props)
         ├──→ particles.setPink(bool)     → GPU uniform 更新
         ├──→ audio.setVolume(level)      → <audio> volume 平滑过渡
         ├──→ audio.setMusicEnabled(bool) → 淡入播放 / 淡出暂停
+        ├──→ datetime.setVisible(bool)   → 显示 / 隐藏日期时间
+        ├──→ datetime.setTimeFormat(v)   → 12 / 24 小时制切换
+        ├──→ datetime.setOffsetX(v)      → 水平偏移
+        ├──→ datetime.setOffsetY(v)      → 垂直偏移
         └──→ background.setDisplayMode() → CSS background-size 更新
 ```
+
+`datetime.js` 的日期语言由浏览器决定，不经过属性面板；`settings.js` 启动时调用它的 `start()`，并把 `customtimeformat` / `customdatetime` / `customoffsetx` / `customoffsety` 分别转发给对应的 setter。
 
 ### WebGPU 粒子系统设计
 
