@@ -167,6 +167,24 @@
 				"ui_12_hour" : "12 小时制",
 				"ui_offset_x" : "水平偏移（正数向右）",
 				"ui_offset_y" : "垂直偏移（正数向下）"
+			},
+			"zh-cht" :
+			{
+				"ui_particle_count" : "粒子数量",
+				"ui_fall_speed" : "粒子速度",
+				"ui_display_mode" : "壁纸显示方式",
+				"ui_fill" : "填充",
+				"ui_fit" : "等比缩放",
+				"ui_original_size" : "原始尺寸",
+				"ui_background_music" : "播放背景音乐（需 music/bgm.flac）",
+				"ui_pink_particles" : "使用粉色粒子",
+				"ui_music_volume" : "背景音乐音量",
+				"ui_show_datetime" : "显示日期时间",
+				"ui_time_format" : "时间制式（12/24 小时）",
+				"ui_24_hour" : "24 小时制",
+				"ui_12_hour" : "12 小时制",
+				"ui_offset_x" : "水平偏移（正数向右）",
+				"ui_offset_y" : "垂直偏移（正数向下）"
 			}
 		}
 	},
