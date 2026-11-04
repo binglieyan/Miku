@@ -114,8 +114,8 @@ let _hour12 = DEV_HOUR12;
 /** @type {number} 水平偏移（-100..100，正数向右）；默认 100 = 右边缘。 */
 let _offsetX = 100;
 
-/** @type {number} 垂直偏移（-100..100，正数向下）；默认 95 = 右下角。 */
-let _offsetY = 95;
+/** @type {number} 垂直偏移（-100..100，正数向下）；默认 90 = 右下角。 */
+let _offsetY = 90;
 
 /** @type {string} 最近一次写入 DOM 的日期文本，避免每秒重复写日期。 */
 let _lastDate = '';

@@ -48,7 +48,7 @@ Right-click the wallpaper in Wallpaper Engine → **Wallpaper** → **Properties
 | Show Date & Time | Toggle | On / Off | On | Hides the overlay and stops its refresh timer |
 | Time Format | Combo | 24-hour / 12-hour | 24-hour | Independent of Chinese/English; chooses `HH:mm:ss` or `h:mm:ss AM/PM` |
 | Horizontal Offset | Slider | -100–100 | 100 | 0 = screen center, -100 = left edge, 100 = right edge; the default sits at the right edge |
-| Vertical Offset | Slider | -100–100 | 95 | 0 = screen center, -100 = top edge, 100 = bottom edge; the default sits near the bottom |
+| Vertical Offset | Slider | -100–100 | 90 | 0 = screen center, -100 = top edge, 100 = bottom edge; the default sits near the bottom |
 
 > **Background music is off by default and no audio is shipped in this repository
 > (`.flac` only).** If your wallpaper folder has no `music/bgm.flac`, put your own

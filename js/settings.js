@@ -19,7 +19,7 @@
  *   customdatetime   — 显示日期时间（bool, 默认 true）
  *   customtimeformat — 时间制式（combo: 24 / 12, 默认 24）
  *   customoffsetx    — 水平偏移（slider, -100–100, 默认 100，正数向右）
- *   customoffsety    — 垂直偏移（slider, -100–100, 默认 95，正数向下）
+ *   customoffsety    — 垂直偏移（slider, -100–100, 默认 90，正数向下）
  *
  * @module settings
  */
@@ -111,7 +111,7 @@ window.wallpaperPropertyListener = {
       setOffsetX(props.customoffsetx.value);
     }
 
-    /** 垂直偏移：正数向下，默认 95（右下角） */
+    /** 垂直偏移：正数向下，默认 90（右下角） */
     if (props.customoffsety) {
       setOffsetY(props.customoffsety.value);
     }

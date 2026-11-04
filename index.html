@@ -41,12 +41,11 @@
     }
 
     /*
-     * 日期时间活动区域：四周留出边距，底部避开 Windows 任务栏。
-     * 组件在这个区域内按 X/Y 百分比定位，永远不会被画到区域外。
+     * 日期时间定位层：四周保留 1.5vmin 边距，X/Y 百分比相对这个区域计算。
      */
     #datetime-layer {
       position: fixed;
-      inset: 2.2vmin 2.2vmin 56px;
+      inset: 1.5vmin;
       z-index: 2;
       pointer-events: none;
     }
@@ -58,8 +57,8 @@
     #datetime {
       position: absolute;
       left: 100%;
-      top: 97.5%;
-      transform: translate(-100%, -97.5%);
+      top: 95%;
+      transform: translate(-100%, -95%);
       display: flex;
       flex-direction: column;
       align-items: flex-end;
